@@ -60,15 +60,16 @@ try {
   assert.strictEqual(api.planAction(path.join(dir, 'does-not-exist.md')), 'create', 'should be create');
   ok('planAction classifies create/append/update');
 
-  // 7. remove --all: blocks gone, emptied created files deleted, empty dirs pruned,
-  //    user-content file kept and byte-identical, manifest cleared
+  // 7. remove --all: strips ONLY our block; never deletes any user file or dir.
   assert(fs.existsSync(path.join(dir, '.cursor', 'rules', 'humanly.mdc')), 'cursor file should exist pre-remove');
   run(['remove', '--all', '--yes'], dir);
-  assert(!fs.existsSync('AGENTS.md'), 'emptied created file should be deleted');
-  assert(!fs.existsSync(path.join(dir, '.cursor')), 'empty .cursor dir should be pruned');
+  assert(fs.existsSync('AGENTS.md'), 'a file we created must NOT be deleted on remove');
+  assert(!/humanly:start/.test(fs.readFileSync('AGENTS.md', 'utf8')), 'our block should be stripped from AGENTS.md');
+  assert(fs.existsSync(path.join(dir, '.cursor', 'rules')), 'a dir we created must NOT be pruned');
+  assert(!/humanly:start/.test(fs.readFileSync(path.join(dir, '.cursor', 'rules', 'humanly.mdc'), 'utf8')), 'block stripped from cursor file');
   assert.strictEqual(fs.readFileSync('CLAUDE.md', 'utf8'), userContent, 'user file not byte-identical after remove');
-  assert(!fs.existsSync('.humanly.json'), 'manifest should be cleared');
-  ok('remove is surgical: strips block, cleans up, keeps user content byte-identical');
+  assert(!fs.existsSync('.humanly.json'), 'manifest (our own bookkeeping file) should be cleared');
+  ok('remove is surgical: strips only our block, never deletes files or dirs, user content intact');
 
   // 8. stream-driven checklist: toggle item 2 off, confirm with enter
   const input = new PassThrough();

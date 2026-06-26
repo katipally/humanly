@@ -1,6 +1,6 @@
 {
   "name": "humanly",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Make every AI agent write humanly: clean (no AI tells), lean (fewer tokens), honest. One ruleset, installed into every agent's instruction file via npx.",
   "bin": {
     "humanly": "bin/humanly.js"
@@ -26,7 +26,7 @@
     "prose",
     "tokens"
   ],
-  "author": "Yashwanth Reddy",
+  "author": "katipally",
   "license": "MIT",
   "homepage": "https://github.com/katipally/humanly",
   "repository": {

@@ -45,9 +45,6 @@ const GLOBAL_TARGETS = [
   { id: 'roo',      label: 'Roo Code (global, legacy)', file: path.join(os.homedir(), '.roo', 'rules', 'humanly.md') },
 ];
 
-// Dirs we create and may prune on remove if left empty. Never the project root or .github.
-const PRUNABLE = ['.cursor/rules', '.cursor', '.windsurf/rules', '.windsurf', '.roo/rules', '.roo'];
-
 class CancelError extends Error {}
 
 // ---------- core: rules + surgical edits ----------
@@ -95,39 +92,21 @@ function injectInto(absPath, body, prefixIfNew) {
   return action;
 }
 
-// Strip only our block. Delete the file if it's now empty (or only our Cursor
-// frontmatter); prune now-empty dirs we created. Leaves user content untouched.
+// Strip ONLY our block. Never delete the file or its directory, even if the file
+// is now empty — the user may have other content there or want to reuse it. We
+// only ever remove our own information, never the file itself.
 function removeFrom(absPath) {
   if (!fs.existsSync(absPath)) return null;
   const content = fs.readFileSync(absPath, 'utf8');
   if (!BLOCK_RE.test(content)) return null;
 
-  let next = content.replace(BLOCK_RE, '').replace(/\n{3,}/g, '\n\n').replace(/^\s+/, '');
-  const leftover = next.trim();
-  const onlyFrontmatter = leftover === CURSOR_PREFIX.trim();
-
-  if (!leftover || onlyFrontmatter) {
-    fs.unlinkSync(absPath);
-    pruneEmptyDirs(absPath);
-  } else {
-    fs.writeFileSync(absPath, next.replace(/\s+$/, '') + '\n');
-  }
+  const next = content
+    .replace(BLOCK_RE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s+/, '')
+    .replace(/\s+$/, '');
+  fs.writeFileSync(absPath, next ? next + '\n' : '');
   return 'removed';
-}
-
-function pruneEmptyDirs(absFile) {
-  let dir = path.dirname(absFile);
-  // walk up while the dir is in our prunable set and empty
-  for (let i = 0; i < 3; i++) {
-    const relFromCwd = path.relative(process.cwd(), dir).split(path.sep).join('/');
-    const relFromHome = path.relative(os.homedir(), dir).split(path.sep).join('/');
-    const prunable = PRUNABLE.includes(relFromCwd) || PRUNABLE.some(p => relFromHome.endsWith(p));
-    if (!prunable) break;
-    try {
-      if (fs.readdirSync(dir).length === 0) { fs.rmdirSync(dir); dir = path.dirname(dir); }
-      else break;
-    } catch { break; }
-  }
 }
 
 // ---------- manifest (bookkeeping for exact removal + reproducible re-init) ----------
@@ -351,11 +330,14 @@ async function runInstallWizard(opts) {
     checked: scope === 'global' ? (t.pre || homeExists(t.file)) : (t.pre || t.detect()),
     hint: scope === 'global' ? null : (t.detect() && !t.pre ? 'detected' : (t.id === 'roo' ? 'legacy' : null)),
   }));
+  // "Add another agent" is itself a selectable option in the list.
+  items.push({ id: '__add__', label: '➕ Add another agent / file not listed…', addMore: true, checked: false });
 
-  let chosen = await checklist({ message: `Select agents to set up (${scope}):`, items });
+  const selected = await checklist({ message: `Select agents to set up (${scope}):`, items });
+  let chosen = selected.filter(s => !s.addMore);
 
-  // custom-add loop
-  if (await confirm({ message: 'Add a custom agent / file not listed above?', def: false })) {
+  // selecting the add option opens the custom-file loop
+  if (selected.some(s => s.addMore)) {
     while (true) {
       const file = await text({ message: '  File path (relative to project, or absolute): ' });
       if (!file) break;

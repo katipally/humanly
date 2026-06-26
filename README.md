@@ -41,10 +41,11 @@ Select agents to set up (project):
   [x] Cursor   (detected)
   [ ] GitHub Copilot
   ...
+  [ ] ➕ Add another agent / file not listed…
   ↑/↓ move · space toggle · a all · enter confirm · esc cancel
 ```
 
-It detects the agents you already use, lets you toggle any others, add a custom file it doesn't know about, and shows a preview (`create` / `append to` / `update in`) before it writes anything.
+It detects the agents you already use and pre-checks them. Toggle any others, or check **➕ Add another agent** right in the list to point humanly at a file it doesn't know about. It shows a preview (`create` / `append to` / `update in`) before writing anything.
 
 **Scriptable flags** (no prompts, for CI or dotfiles):
 
@@ -74,7 +75,7 @@ npx humanly remove           # wizard: lists only real installs, you pick which
 npx humanly remove --all --yes
 ```
 
-Remove scans everywhere humanly actually lives, then strips **only** its own block. If a file it created becomes empty, it deletes it; if a directory it created (`.cursor/rules`, `.windsurf/rules`, `.roo/rules`) is left empty, it prunes it. A file with your own content comes back byte-for-byte identical.
+Remove scans everywhere humanly actually lives, then strips **only** its own block. It **never deletes your files or folders** — even a file humanly created is left in place (just emptied) for you to keep or delete. A file with your own content comes back byte-for-byte identical.
 
 ## Where it writes
 
@@ -97,7 +98,7 @@ Installs are idempotent. Re-running `init` updates the block in place, never dup
 
 ## Safe by design
 
-humanly only ever touches its own marked block. It **appends**, never replaces: your existing instructions, comments, and frontmatter are left untouched, and on remove the file returns to exactly what it was. A small `.humanly.json` records what was installed so removal is precise (delete it anytime; remove still scans the catalog as a fallback).
+humanly only ever touches its own marked block. Install **appends** (and creates a file only when one doesn't exist); it never replaces or rewrites your existing instructions, comments, or frontmatter. Remove strips only that block and **never deletes a file or folder** — your content comes back byte-identical, and a file humanly created is simply left empty for you to keep or remove. A small `.humanly.json` records what was installed so removal is precise (delete it anytime; remove still scans the catalog as a fallback).
 
 ## Honest note on "100%"
 
