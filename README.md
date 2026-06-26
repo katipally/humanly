@@ -31,18 +31,20 @@ npx humanly
 ```
 
 ```
-Install humanly for:
-> (•) This project (current folder)
-  ( ) Globally (your whole machine)
-
-Select agents to set up (project):
-  [x] AGENTS.md hub (Codex, OpenCode, Amp, Zed, Kilo, Trae, Jules)
-  [x] Claude Code
-  [x] Cursor   (detected)
-  [ ] GitHub Copilot
-  ...
-  [ ] ➕ Add another agent / file not listed…
-  ↑/↓ move · space toggle · a all · enter confirm · esc cancel
+┌  humanly  v0.2.2
+│
+◇  Install humanly for  ↑↓ move · enter select
+│  ❯ ● This project (current folder)
+│    ○ Globally (your whole machine)
+│
+◇  Select agents (project)  ↑↓ move · space pick · a all · enter ok
+│    ◉ AGENTS.md hub (Codex, OpenCode, Amp, Zed, Kilo, Trae)  ·detected·
+│    ◉ Claude Code  ·detected·
+│  ❯ ◉ Cursor
+│    ◯ GitHub Copilot
+│    ◯ ➕ Add another agent / file not listed…
+│
+└  Done. Open a new agent session to pick up the rules.
 ```
 
 It detects the agents you already use and pre-checks them. Toggle any others, or check **➕ Add another agent** right in the list to point humanly at a file it doesn't know about. It shows a preview (`create` / `append to` / `update in`) before writing anything.

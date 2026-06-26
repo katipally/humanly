@@ -152,20 +152,24 @@ function displayPath(file) {
 
 // ---------- apply / undo ----------
 
-function applyInstall(scope, targets) {
+function applyInstall(scope, targets, styled = false) {
   const rules = loadRules();
-  const lines = [];
+  const results = [];
   for (const t of targets) {
     const action = injectInto(absOf(t.file), rules, t.prefix);
-    lines.push(`  ${action.padEnd(8)} ${displayPath(t.file)}`);
+    results.push({ action, file: t.file });
   }
   // merge with anything already in the manifest so re-runs don't forget prior targets
   const prev = readManifest(scope);
   const merged = dedupeByFile([...(prev ? prev.targets : []), ...targets.map(t => ({ id: t.id, file: t.file, frontmatter: !!t.prefix }))]);
   writeManifest(scope, merged.map(m => ({ id: m.id, file: m.file, prefix: m.frontmatter ? CURSOR_PREFIX : undefined })));
 
+  if (styled) {
+    for (const r of results) gline(`${c.green(S.tick)} ${c.gray(r.action.padEnd(8))} ${displayPath(r.file)}`);
+    return;
+  }
   console.log(`humanly v${VERSION} — installed clean+lean+honest rules into:`);
-  console.log(lines.join('\n'));
+  for (const r of results) console.log(`  ${r.action.padEnd(8)} ${displayPath(r.file)}`);
   console.log('\nDone. Open a new agent session to pick up the rules.');
   console.log('Undo anytime with: npx humanly remove');
 }
@@ -191,10 +195,10 @@ function findInstalled(scope) {
   });
 }
 
-function applyRemove(scope, targets) {
+function applyRemove(scope, targets, styled = false) {
   const removed = [];
   for (const t of targets) {
-    if (removeFrom(absOf(t.file))) removed.push('  ' + displayPath(t.file));
+    if (removeFrom(absOf(t.file))) removed.push(displayPath(t.file));
   }
   // update manifest: drop removed entries; clear it if nothing humanly-managed remains
   if (findInstalled(scope).length === 0) clearManifest(scope);
@@ -206,46 +210,78 @@ function applyRemove(scope, targets) {
         .map(t => ({ id: t.id, file: t.file, prefix: t.frontmatter ? CURSOR_PREFIX : undefined })));
     }
   }
+  if (styled) {
+    for (const f of removed) gline(`${c.green(S.tick)} ${c.gray('stripped')} ${f}`);
+    return;
+  }
   if (removed.length) {
     console.log('humanly — removed the rules block from:');
-    console.log(removed.join('\n'));
+    for (const f of removed) console.log('  ' + f);
   } else {
     console.log('humanly — nothing to remove (no managed block found).');
   }
 }
 
-// ---------- zero-dep prompts (TTY arrow-keys, numbered fallback) ----------
+// ---------- zero-dep clack-style UI (TTY arrow-keys, numbered fallback) ----------
 
-function dim(s, output) { return output && output.isTTY ? `\x1b[2m${s}\x1b[0m` : s; }
+const useColor = out => (out || process.stdout).isTTY && !process.env.NO_COLOR;
+const paint = (s, code, out) => useColor(out) ? `\x1b[${code}m${s}\x1b[0m` : s;
+const c = {
+  gray:  (s, o) => paint(s, 90, o),
+  cyan:  (s, o) => paint(s, 36, o),
+  green: (s, o) => paint(s, 32, o),
+  red:   (s, o) => paint(s, 31, o),
+  yellow:(s, o) => paint(s, 33, o),
+  bold:  (s, o) => paint(s, 1, o),
+  dim:   (s, o) => paint(s, 2, o),
+};
+const S = { top: '┌', bar: '│', end: '└', step: '◇', on: '◉', off: '◯', radioOn: '●', radioOff: '○', ptr: '❯', tick: '✓' };
+
+function intro(title, output = process.stdout) { output.write(`${c.gray(S.top, output)}  ${c.bold(title, output)}\n${c.gray(S.bar, output)}\n`); }
+function outro(text, output = process.stdout) { output.write(`${c.gray(S.bar, output)}\n${c.gray(S.end, output)}  ${text}\n`); }
+function gline(text = '', output = process.stdout) { output.write(c.gray(S.bar, output) + (text ? '  ' + text : '') + '\n'); }
+
+function rawOn(input) { readline.emitKeypressEvents(input); if (input.isTTY && input.setRawMode) input.setRawMode(true); }
+function rawOff(input, onKey) { input.removeListener('keypress', onKey); if (input.isTTY && input.setRawMode) input.setRawMode(false); }
 
 function checklist({ message, items, input = process.stdin, output = process.stdout, interactive = input.isTTY }) {
   if (!interactive) return numberedChecklist({ message, items, input, output });
   return new Promise((resolve, reject) => {
     let idx = 0;
     const state = items.map(it => !!it.checked);
-    let renderedLines = 0;
-    readline.emitKeypressEvents(input);
-    if (input.isTTY && input.setRawMode) input.setRawMode(true);
+    let lines = 0;
+    rawOn(input);
 
     const render = () => {
-      if (renderedLines && output.isTTY) { readline.moveCursor(output, 0, -renderedLines); readline.clearScreenDown(output); }
-      let out = message + '\n';
+      if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
+      let out = `${c.cyan(S.step, output)}  ${c.bold(message, output)}  ${c.gray('↑↓ move · space pick · a all · enter ok', output)}\n`;
       items.forEach((it, i) => {
-        out += `${i === idx ? '>' : ' '} ${state[i] ? '[x]' : '[ ]'} ${it.label}${it.hint ? '  ' + dim('(' + it.hint + ')', output) : ''}\n`;
+        const active = i === idx;
+        const ptr = active ? c.cyan(S.ptr, output) : ' ';
+        const box = state[i] ? c.green(S.on, output) : c.gray(S.off, output);
+        const hint = it.hint ? '  ' + c.gray('·' + it.hint + '·', output) : '';
+        const label = active ? it.label : (state[i] ? it.label : c.dim(it.label, output));
+        out += `${c.gray(S.bar, output)}  ${ptr} ${box} ${label}${hint}\n`;
       });
-      out += dim('  ↑/↓ move · space toggle · a all · enter confirm · esc cancel', output) + '\n';
       output.write(out);
-      renderedLines = out.split('\n').length - 1;
+      lines = out.split('\n').length - 1;
     };
-    const cleanup = () => { input.removeListener('keypress', onKey); if (input.isTTY && input.setRawMode) input.setRawMode(false); };
+    const done = () => {
+      rawOff(input, onKey);
+      if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
+      const chosen = items.filter((_, i) => state[i]);
+      const names = chosen.map(x => (x.shortLabel || x.label)).join(', ') || 'none';
+      output.write(`${c.green(S.step, output)}  ${c.bold(message, output)}  ${c.gray('· ' + names, output)}\n`);
+      resolve(chosen);
+    };
     const onKey = (str, key) => {
       key = key || {};
-      if (key.name === 'up') idx = (idx - 1 + items.length) % items.length;
-      else if (key.name === 'down') idx = (idx + 1) % items.length;
+      if (key.name === 'up' || key.name === 'k') idx = (idx - 1 + items.length) % items.length;
+      else if (key.name === 'down' || key.name === 'j') idx = (idx + 1) % items.length;
       else if (key.name === 'space') state[idx] = !state[idx];
       else if (key.name === 'a') { const all = state.every(Boolean); state.fill(!all); }
-      else if (key.name === 'return' || key.name === 'enter') { cleanup(); output.write('\n'); return resolve(items.filter((_, i) => state[i])); }
-      else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { cleanup(); return reject(new CancelError()); }
+      else if (key.name === 'return' || key.name === 'enter') return done();
+      else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { rawOff(input, onKey); return reject(new CancelError()); }
       else return;
       render();
     };
@@ -256,55 +292,77 @@ function checklist({ message, items, input = process.stdin, output = process.std
 
 function numberedChecklist({ message, items, input, output }) {
   const pre = items.map((it, i) => it.checked ? i + 1 : null).filter(Boolean).join(',');
-  output.write(message + '\n');
-  items.forEach((it, i) => output.write(`  ${i + 1}) ${it.label}${it.checked ? '  [detected]' : ''}\n`));
-  return question(`Numbers to install (comma-separated, enter = ${pre || 'none'}): `, input, output)
+  gline(c.bold(message, output), output);
+  items.forEach((it, i) => gline(`${i + 1}) ${it.label}${it.checked ? '  ' + c.gray('·detected·', output) : ''}`, output));
+  return question(`${c.gray(S.bar, output)}  numbers (comma-separated, enter = ${pre || 'none'}): `, input, output)
     .then(ans => {
       const picked = ans.trim() ? ans.split(/[\s,]+/).map(n => parseInt(n, 10) - 1) : items.map((it, i) => it.checked ? i : -1);
       return items.filter((_, i) => picked.includes(i));
     });
 }
 
-function confirm({ message, def = true, input = process.stdin, output = process.stdout }) {
-  if (!input.isTTY) return Promise.resolve(def);
-  return question(`${message} ${def ? '[Y/n]' : '[y/N]'} `, input, output)
-    .then(a => { a = a.trim().toLowerCase(); return a ? a[0] === 'y' : def; });
-}
-
-function text({ message, input = process.stdin, output = process.stdout }) {
-  return question(message, input, output).then(a => a.trim());
-}
-
 function select({ message, items, input = process.stdin, output = process.stdout }) {
-  // single-choice via checklist semantics, but radio: reuse numbered for simplicity
   if (!input.isTTY) {
-    output.write(message + '\n');
-    items.forEach((it, i) => output.write(`  ${i + 1}) ${it.label}\n`));
-    return question('Choose (enter = 1): ', input, output).then(a => items[(parseInt(a, 10) || 1) - 1]);
+    gline(c.bold(message, output), output);
+    items.forEach((it, i) => gline(`${i + 1}) ${it.label}`, output));
+    return question(`${c.gray(S.bar, output)}  choose (enter = 1): `, input, output).then(a => items[(parseInt(a, 10) || 1) - 1]);
   }
   return new Promise((resolve, reject) => {
-    let idx = 0, renderedLines = 0;
-    readline.emitKeypressEvents(input);
-    if (input.setRawMode) input.setRawMode(true);
+    let idx = 0, lines = 0;
+    rawOn(input);
     const render = () => {
-      if (renderedLines && output.isTTY) { readline.moveCursor(output, 0, -renderedLines); readline.clearScreenDown(output); }
-      let out = message + '\n';
-      items.forEach((it, i) => { out += `${i === idx ? '>' : ' '} ${i === idx ? '(•)' : '( )'} ${it.label}\n`; });
-      out += dim('  ↑/↓ move · enter select · esc cancel', output) + '\n';
-      output.write(out); renderedLines = out.split('\n').length - 1;
+      if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
+      let out = `${c.cyan(S.step, output)}  ${c.bold(message, output)}  ${c.gray('↑↓ move · enter select', output)}\n`;
+      items.forEach((it, i) => {
+        const active = i === idx;
+        const dot = active ? c.green(S.radioOn, output) : c.gray(S.radioOff, output);
+        const label = active ? it.label : c.dim(it.label, output);
+        out += `${c.gray(S.bar, output)}  ${active ? c.cyan(S.ptr, output) : ' '} ${dot} ${label}\n`;
+      });
+      output.write(out); lines = out.split('\n').length - 1;
     };
-    const cleanup = () => { input.removeListener('keypress', onKey); if (input.setRawMode) input.setRawMode(false); };
     const onKey = (s, key) => {
       key = key || {};
-      if (key.name === 'up') idx = (idx - 1 + items.length) % items.length;
-      else if (key.name === 'down') idx = (idx + 1) % items.length;
-      else if (key.name === 'return' || key.name === 'enter') { cleanup(); output.write('\n'); return resolve(items[idx]); }
-      else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { cleanup(); return reject(new CancelError()); }
+      if (key.name === 'up' || key.name === 'k') idx = (idx - 1 + items.length) % items.length;
+      else if (key.name === 'down' || key.name === 'j') idx = (idx + 1) % items.length;
+      else if (key.name === 'return' || key.name === 'enter') {
+        rawOff(input, onKey);
+        if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
+        output.write(`${c.green(S.step, output)}  ${c.bold(message, output)}  ${c.gray('· ' + items[idx].label, output)}\n`);
+        return resolve(items[idx]);
+      }
+      else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { rawOff(input, onKey); return reject(new CancelError()); }
       else return;
       render();
     };
     render(); input.on('keypress', onKey);
   });
+}
+
+function confirm({ message, def = true, input = process.stdin, output = process.stdout }) {
+  if (!input.isTTY) return Promise.resolve(def);
+  return new Promise(resolve => {
+    rawOn(input);
+    output.write(`${c.cyan(S.step, output)}  ${c.bold(message, output)} ${c.gray(def ? '(Y/n)' : '(y/N)', output)} `);
+    const onKey = (s, key) => {
+      key = key || {};
+      let v;
+      if (key.name === 'y') v = true;
+      else if (key.name === 'n') v = false;
+      else if (key.name === 'return' || key.name === 'enter') v = def;
+      else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { rawOff(input, onKey); output.write('\n'); return resolve(def); }
+      else return;
+      rawOff(input, onKey);
+      output.write(c.gray(v ? 'yes' : 'no', output) + '\n');
+      resolve(v);
+    };
+    input.on('keypress', onKey);
+  });
+}
+
+function text({ message, input = process.stdin, output = process.stdout }) {
+  output.write(`${c.cyan(S.step, output)}  ${c.bold(message, output)}\n`);
+  return question(`${c.gray(S.bar, output)}  `, input, output).then(a => a.trim());
 }
 
 function question(q, input, output) {
@@ -315,9 +373,10 @@ function question(q, input, output) {
 // ---------- wizards ----------
 
 async function runInstallWizard(opts) {
+  intro(`humanly  ${c.gray('v' + VERSION)}`);
   let scope = opts.global ? 'global' : null;
   if (!scope) {
-    const pick = await select({ message: 'Install humanly for:', items: [
+    const pick = await select({ message: 'Install humanly for', items: [
       { id: 'project', label: 'This project (current folder)' },
       { id: 'global', label: 'Globally (your whole machine)' },
     ] });
@@ -333,46 +392,54 @@ async function runInstallWizard(opts) {
   // "Add another agent" is itself a selectable option in the list.
   items.push({ id: '__add__', label: '➕ Add another agent / file not listed…', addMore: true, checked: false });
 
-  const selected = await checklist({ message: `Select agents to set up (${scope}):`, items });
+  const selected = await checklist({ message: `Select agents (${scope})`, items });
   let chosen = selected.filter(s => !s.addMore);
 
   // selecting the add option opens the custom-file loop
   if (selected.some(s => s.addMore)) {
     while (true) {
-      const file = await text({ message: '  File path (relative to project, or absolute): ' });
+      const file = await text({ message: 'Custom file path (relative or absolute)' });
       if (!file) break;
-      const fm = await confirm({ message: '  Does it need Cursor-style frontmatter?', def: false });
+      const fm = await confirm({ message: 'Needs Cursor-style frontmatter?', def: false });
       chosen.push(customTarget(file, fm));
-      if (!(await confirm({ message: '  Add another?', def: false }))) break;
+      if (!(await confirm({ message: 'Add another file?', def: false }))) break;
     }
   }
 
   chosen = dedupeByFile(chosen);
-  if (!chosen.length) { console.log('Nothing selected. Nothing changed.'); return; }
+  if (!chosen.length) { outro(c.yellow('Nothing selected. Nothing changed.')); return; }
 
   // preview
-  console.log('\nPlanned changes:');
-  for (const t of chosen) console.log(`  ${planAction(absOf(t.file)).padEnd(7)} ${displayPath(t.file)}`);
-  if (!(await confirm({ message: '\nProceed?', def: true }))) { console.log('Cancelled. Nothing changed.'); return; }
+  gline(c.bold('Planned changes'));
+  for (const t of chosen) {
+    const a = planAction(absOf(t.file));
+    const tag = a === 'create' ? c.green('create ') : a === 'update' ? c.cyan('update ') : c.yellow('append ');
+    gline(`${tag} ${displayPath(t.file)}`);
+  }
+  gline();
+  if (!(await confirm({ message: 'Proceed?', def: true }))) { outro(c.yellow('Cancelled. Nothing changed.')); return; }
 
-  applyInstall(scope, chosen);
+  applyInstall(scope, chosen, true);
+  outro(`${c.green('Done.')} Open a new agent session to pick up the rules. Undo: ${c.cyan('npx humanly remove')}`);
 }
 
 async function runRemoveWizard(opts) {
+  intro(`humanly remove  ${c.gray('v' + VERSION)}`);
   const scopes = opts.global ? ['global'] : ['project', 'global'];
   let found = [];
   for (const s of scopes) found.push(...findInstalled(s).map(t => ({ ...t, scope: s })));
-  if (!found.length) { console.log('humanly — nothing installed to remove.'); return; }
+  if (!found.length) { outro('Nothing installed to remove.'); return; }
 
-  const items = found.map(t => ({ ...t, checked: true, label: `${displayPath(t.file)}  ${dim('(' + t.scope + ')', process.stdout)}` }));
-  const chosen = await checklist({ message: 'Remove humanly from:', items });
-  if (!chosen.length) { console.log('Nothing selected. Nothing changed.'); return; }
-  if (!(await confirm({ message: `Remove ${chosen.length} file(s)?`, def: true }))) { console.log('Cancelled. Nothing changed.'); return; }
+  const items = found.map(t => ({ ...t, checked: true, label: `${displayPath(t.file)}  ${c.gray('(' + t.scope + ')')}`, shortLabel: displayPath(t.file) }));
+  const chosen = await checklist({ message: 'Remove humanly from', items });
+  if (!chosen.length) { outro(c.yellow('Nothing selected. Nothing changed.')); return; }
+  if (!(await confirm({ message: `Remove from ${chosen.length} file(s)? (only our block; files are kept)`, def: true }))) { outro(c.yellow('Cancelled. Nothing changed.')); return; }
 
   for (const s of scopes) {
-    const forScope = chosen.filter(c => c.scope === s);
-    if (forScope.length) applyRemove(s, forScope);
+    const forScope = chosen.filter(c2 => c2.scope === s);
+    if (forScope.length) applyRemove(s, forScope, true);
   }
+  outro(`${c.green('Removed.')} Your files are intact, only humanly's block was stripped.`);
 }
 
 function homeExists(file) {
