@@ -13,63 +13,84 @@ const assert = require('assert');
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'bin', 'humanly.js');
-const RULES = path.join(ROOT, 'src', 'rules.md');
+const SKILL = path.join(ROOT, 'src', 'skill', 'humanly', 'SKILL.md');
 const api = require(CLI);
 
 let passed = 0;
 function ok(name) { console.log('  ok  ' + name); passed++; }
 function run(args, cwd) { return execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
 
-// 1. ruleset loads with all three pillars
-const rules = fs.readFileSync(RULES, 'utf8');
-assert(/No em dash/i.test(rules) && /LEAN/.test(rules) && /TRUTH/.test(rules), 'pillars missing');
-ok('ruleset loads with Clean/Lean/Truth pillars');
+// 1. skill source has the right frontmatter id + all three pillars
+const skill = fs.readFileSync(SKILL, 'utf8');
+assert(/name:\s*humanly\b/.test(skill), 'frontmatter name missing');
+assert(/No em dash/i.test(skill) && /LEAN/.test(skill) && /TRUTH/.test(skill), 'Clean/Lean/Truth pillars missing');
+ok('skill source has frontmatter id + Clean/Lean/Truth pillars');
 
-// 2. HUMANLY.md mirrors the source
-assert.strictEqual(fs.readFileSync(path.join(ROOT, 'HUMANLY.md'), 'utf8').trim(), rules.trim(), 'HUMANLY.md drifted');
-ok('HUMANLY.md matches src/rules.md');
+// the tool that bans em dashes must not ship one. Guard every published file
+// (package.json "files": bin, src, README). test/ is not published, so it may keep the
+// em dash in its detector regex and legacy fixture below.
+for (const rel of ['src/skill/humanly/SKILL.md', 'bin/humanly.js', 'README.md']) {
+  assert(!/—/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')), rel + ' contains an em dash');
+}
+ok('every published file is free of em dashes');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'humanly-test-'));
 const orig = process.cwd();
 try {
-  // 3. init --all + custom --add writes blocks and a manifest
+  // 2. init --only writes SKILL.md into each tool's native skills dir + a manifest
   process.chdir(dir);
-  run(['init', '--all', '--add', './extra.md:fm', '--yes'], dir);
-  const agents = fs.readFileSync('AGENTS.md', 'utf8');
-  assert(/humanly:start/.test(agents) && /No em dash/.test(agents), 'AGENTS.md not written');
-  const extra = fs.readFileSync('extra.md', 'utf8');
-  assert(/alwaysApply: true/.test(extra) && /humanly:start/.test(extra), 'custom --add:fm missing frontmatter/block');
+  run(['init', '--only', 'claude,agents,copilot', '--local', '--yes'], dir);
+  const claudeSkill = path.join(dir, '.claude', 'skills', 'humanly', 'SKILL.md');
+  const agentsSkill = path.join(dir, '.agents', 'skills', 'humanly', 'SKILL.md');
+  const copilotSkill = path.join(dir, '.github', 'skills', 'humanly', 'SKILL.md');
+  assert(fs.existsSync(claudeSkill) && /name:\s*humanly/.test(fs.readFileSync(claudeSkill, 'utf8')), '.claude skill not written');
+  assert(fs.existsSync(agentsSkill), '.agents skill not written');
+  assert(fs.existsSync(copilotSkill), '.github skill not written');
   const man = JSON.parse(fs.readFileSync('.humanly.json', 'utf8'));
-  assert(man.targets.some(t => t.file === './extra.md'), 'manifest missing custom target');
-  ok('init --all --add writes blocks + manifest');
+  assert(man.skills.length >= 3, 'manifest missing entries');
+  ok('init --only writes SKILL.md per tool + manifest');
 
-  // 4. idempotent
-  run(['init', '--all', '--yes'], dir);
-  assert.strictEqual((fs.readFileSync('AGENTS.md', 'utf8').match(/humanly:start/g) || []).length, 1, 'duplicate block');
-  ok('init is idempotent');
+  // 3. installed file is byte-identical to the source
+  assert.strictEqual(fs.readFileSync(claudeSkill, 'utf8'), skill, 'installed skill drifted from source');
+  ok('installed SKILL.md matches the source');
 
-  // 5. surgical: existing user content preserved, byte-identical after remove
-  const userContent = '# My rules\n\nAlways use tabs.\n';
-  fs.writeFileSync('CLAUDE.md', userContent);
-  run(['init', '--only', 'claude', '--yes'], dir);
-  assert(/Always use tabs/.test(fs.readFileSync('CLAUDE.md', 'utf8')), 'user content lost on install');
-  ok('install preserves existing user content');
+  // 4. idempotent — re-run does not duplicate or error
+  run(['init', '--only', 'claude', '--local', '--yes'], dir);
+  assert.strictEqual(api.planAction(path.join(dir, '.claude', 'skills', 'humanly')), 'update', 'should report update');
+  assert.strictEqual(api.planAction(path.join(dir, '.nope', 'skills', 'humanly')), 'create', 'should report create');
+  ok('init is idempotent; planAction classifies create/update');
 
-  // 6. planAction reports create/append/update correctly
-  assert.strictEqual(api.planAction(path.join(dir, 'CLAUDE.md')), 'update', 'should be update');
-  assert.strictEqual(api.planAction(path.join(dir, 'does-not-exist.md')), 'create', 'should be create');
-  ok('planAction classifies create/append/update');
+  // 5. legacy migration: an old injected humanly block is stripped on init
+  const legacyFile = path.join(dir, 'AGENTS.md');
+  const userLine = '# My project rules\n\nAlways use tabs.\n';
+  fs.writeFileSync(legacyFile, userLine + '\n<!-- humanly:start v0.2.3 -->\n# humanly — write clean, lean, honest\n- No em dash.\n<!-- humanly:end -->\n');
+  run(['init', '--only', 'claude', '--local', '--yes'], dir);
+  const sweptAgents = fs.readFileSync(legacyFile, 'utf8');
+  assert(!/humanly:start/.test(sweptAgents), 'old injected block should be stripped');
+  assert(/Always use tabs/.test(sweptAgents), 'user content around the legacy block must survive');
+  ok('init strips the legacy injected block, keeps user content');
 
-  // 7. remove --all: strips ONLY our block; never deletes any user file or dir.
-  assert(fs.existsSync(path.join(dir, '.cursor', 'rules', 'humanly.mdc')), 'cursor file should exist pre-remove');
+  // 6. a sibling skill is left untouched by install and remove
+  const sibling = path.join(dir, '.claude', 'skills', 'other', 'SKILL.md');
+  fs.mkdirSync(path.dirname(sibling), { recursive: true });
+  fs.writeFileSync(sibling, '---\nname: other-skill\n---\nkeep me\n');
+
+  // 7. remove --all deletes ONLY our skill folders, never siblings or the parent dir
   run(['remove', '--all', '--yes'], dir);
-  assert(fs.existsSync('AGENTS.md'), 'a file we created must NOT be deleted on remove');
-  assert(!/humanly:start/.test(fs.readFileSync('AGENTS.md', 'utf8')), 'our block should be stripped from AGENTS.md');
-  assert(fs.existsSync(path.join(dir, '.cursor', 'rules')), 'a dir we created must NOT be pruned');
-  assert(!/humanly:start/.test(fs.readFileSync(path.join(dir, '.cursor', 'rules', 'humanly.mdc'), 'utf8')), 'block stripped from cursor file');
-  assert.strictEqual(fs.readFileSync('CLAUDE.md', 'utf8'), userContent, 'user file not byte-identical after remove');
-  assert(!fs.existsSync('.humanly.json'), 'manifest (our own bookkeeping file) should be cleared');
-  ok('remove is surgical: strips only our block, never deletes files or dirs, user content intact');
+  assert(!fs.existsSync(path.join(dir, '.claude', 'skills', 'humanly')), 'our skill folder should be gone');
+  assert(fs.existsSync(sibling) && /keep me/.test(fs.readFileSync(sibling, 'utf8')), 'sibling skill must survive remove');
+  assert(fs.existsSync(path.join(dir, '.claude', 'skills')), 'skills parent dir must not be pruned');
+  assert(!fs.existsSync('.humanly.json'), 'manifest should be cleared when nothing of ours remains');
+  ok('remove is surgical: deletes only our folder, keeps siblings + dirs');
+
+  // 8. isOurs guards against deleting a foreign "humanly" folder
+  const foreign = path.join(dir, '.cursor', 'skills', 'humanly');
+  fs.mkdirSync(foreign, { recursive: true });
+  fs.writeFileSync(path.join(foreign, 'SKILL.md'), '---\nname: someone-elses\n---\n');
+  assert.strictEqual(api.isOurs(foreign), false, 'foreign folder must not be claimed as ours');
+  assert.strictEqual(api.removeSkill(foreign), null, 'removeSkill must refuse a foreign folder');
+  assert(fs.existsSync(foreign), 'foreign folder must survive');
+  ok('isOurs/removeSkill refuse a foreign humanly folder');
 
   // helper: drive a checklist via a fake stream and a sequence of key writes
   const drive = (items, keys) => {
@@ -80,14 +101,14 @@ try {
   };
 
   (async () => {
-    // 8. checklist: move down to B, space to uncheck, enter
+    // 9. checklist: move down to B, space to uncheck, enter
     const sel1 = await drive([{ label: 'A', checked: true }, { label: 'B', checked: true }, { label: 'C', checked: false }],
       ['\x1b[B', ' ', '\r']);
     assert.deepStrictEqual(sel1.map(s => s.label), ['A'], 'toggle wrong: ' + sel1.map(s => s.label));
     ok('stream-driven checklist toggles + confirms');
 
-    // 9. search: type "gem" to filter to Gemini, space to select, enter
-    const sel2 = await drive([{ label: 'Cursor' }, { label: 'Gemini CLI' }, { label: 'Windsurf' }],
+    // 10. search: type "gem" to filter to Gemini, space to select, enter
+    const sel2 = await drive([{ label: 'Cursor' }, { label: 'Gemini CLI', keywords: 'google gemini' }, { label: 'Windsurf' }],
       [...'gem', ' ', '\r']);
     assert.deepStrictEqual(sel2.map(s => s.label), ['Gemini CLI'], 'search wrong: ' + sel2.map(s => s.label));
     ok('checklist search filters then selects');

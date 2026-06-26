@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-// humanly — install one clean/lean/honest writing ruleset into every AI agent's
-// instruction file. Surgical (append-only, marker-scoped), vendor-neutral, npx-only,
-// zero dependencies.
+// humanly: install one Agent Skill that makes any agent write clean, lean, honest prose
+// (no AI tells: no em dashes, no AI-vocab, no filler, no invented facts). Writes a SKILL.md
+// folder into each tool's native skills directory. Vendor-neutral, npx-only, zero dependencies.
+// SKILL.md is an open standard read by many tools.
 
 const fs = require('fs');
 const os = require('os');
@@ -13,129 +14,145 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require(path.join(ROOT, 'package.json')).version;
-const RULES_PATH = path.join(ROOT, 'src', 'rules.md');
-
-const START = `<!-- humanly:start v${VERSION} -->`;
-const NOTE = '<!-- Managed by humanly (npx humanly). Edit outside these markers; this block is overwritten. -->';
-const END = '<!-- humanly:end -->';
-const BLOCK_RE = /<!-- humanly:start[^>]*-->[\s\S]*?<!-- humanly:end -->/;
-
-// Cursor's modern rule files use frontmatter to apply automatically.
-const CURSOR_PREFIX = '---\ndescription: Write clean, lean, honest prose (humanly)\nalwaysApply: true\n---';
+const SKILL_SRC = path.join(ROOT, 'src', 'skill', 'humanly', 'SKILL.md');
+const SKILL_NAME = 'humanly';   // the installed skill folder name
+const SKILL_ID = 'humanly';     // frontmatter name, used to verify a folder is ours
 
 const home = (...p) => path.join(os.homedir(), ...p);
 
-// Project-level catalog (verified file paths, Jun 2026). `pre` = pre-checked in the
-// wizard. `detect` flips pre on when the agent's footprint is found. `keywords` make
-// an agent findable by brand in search even when it shares a file. `tag` shows a note.
-// AGENTS.md is the Linux-Foundation standard read by many tools; agents with their own
-// native file get a dedicated entry instead.
+// Catalog of skills-compatible tools (verified discovery paths, Jun 2026). Each `dir` is the
+// PARENT skills directory; we write `<dir>/humanly/SKILL.md`. `pre` = pre-checked in the wizard.
+// `detect` flips it on when the tool's footprint is present. `.agents/skills` is the cross-tool
+// open standard read by Codex, Goose, OpenHands and others, so the `agents` entry covers them;
+// Amp also reads it at project scope but has its own global path.
 const TARGETS = [
-  { id: 'agents',   label: 'AGENTS.md — universal standard', file: 'AGENTS.md', pre: true, detect: () => true,
-    keywords: 'codex opencode amp sourcegraph zed devin jules factory droid openhands universal standard' },
-  { id: 'claude',   label: 'Claude Code', file: 'CLAUDE.md', pre: true, detect: () => true, keywords: 'anthropic claude' },
-  { id: 'cursor',   label: 'Cursor', file: '.cursor/rules/humanly.mdc', prefix: CURSOR_PREFIX, keywords: 'cursor', detect: () => exists('.cursor') || exists('.cursorrules') },
-  { id: 'copilot',  label: 'GitHub Copilot', file: '.github/copilot-instructions.md', keywords: 'github copilot vscode visual studio', detect: () => exists('.github') },
-  { id: 'gemini',   label: 'Gemini CLI', file: 'GEMINI.md', keywords: 'google gemini', detect: () => exists('GEMINI.md') || exists('.gemini') },
-  { id: 'windsurf', label: 'Windsurf / Devin Desktop', file: '.windsurf/rules/humanly.md', keywords: 'windsurf devin cascade codeium', detect: () => exists('.windsurf') || exists('.windsurfrules') || exists('.devin') },
-  { id: 'cline',    label: 'Cline', file: '.clinerules', keywords: 'cline', detect: () => exists('.clinerules') },
-  { id: 'continue', label: 'Continue.dev', file: '.continue/rules/humanly.md', keywords: 'continue', detect: () => exists('.continue') },
-  { id: 'augment',  label: 'Augment Code', file: '.augment/rules/humanly.md', keywords: 'augment', detect: () => exists('.augment') || exists('.augment-guidelines') },
-  { id: 'kilo',     label: 'Kilo Code', file: '.kilocode/rules/humanly.md', keywords: 'kilo kilocode', detect: () => exists('.kilocode') },
-  { id: 'trae',     label: 'Trae', file: '.trae/rules/project_rules.md', keywords: 'trae bytedance', detect: () => exists('.trae') },
-  { id: 'junie',    label: 'JetBrains Junie', file: '.junie/AGENTS.md', keywords: 'junie jetbrains intellij', detect: () => exists('.junie') },
-  { id: 'warp',     label: 'Warp', file: 'WARP.md', keywords: 'warp terminal', detect: () => exists('WARP.md') },
-  { id: 'goose',    label: 'Goose (Block)', file: '.goosehints', keywords: 'goose block', detect: () => exists('.goosehints') },
-  { id: 'replit',   label: 'Replit Agent', file: 'replit.md', keywords: 'replit', detect: () => exists('replit.md') || exists('.replit') },
-  { id: 'firebase', label: 'Firebase Studio (ex Project IDX)', file: '.idx/airules.md', keywords: 'firebase studio idx project airules google', detect: () => exists('.idx') },
-  { id: 'tabnine',  label: 'Tabnine', file: '.tabnine/guidelines/humanly.md', keywords: 'tabnine', detect: () => exists('.tabnine') },
-  { id: 'cody',     label: 'Sourcegraph Cody', file: '.sourcegraph/humanly.rule.md', keywords: 'sourcegraph cody', tag: 'enterprise', detect: () => exists('.sourcegraph') },
-  { id: 'qodo',     label: 'Qodo (ex CodiumAI)', file: 'best_practices.md', keywords: 'qodo codium', detect: () => exists('best_practices.md') },
-  { id: 'aider',    label: 'Aider', file: 'CONVENTIONS.md', keywords: 'aider', tag: 'add to .aider.conf.yml read:', detect: () => exists('.aider.conf.yml') || exists('.aider.conf.yaml') },
-  { id: 'roo',      label: 'Roo Code', file: '.roo/rules/humanly.md', keywords: 'roo roocode', tag: 'legacy', detect: () => exists('.roo') || exists('.roorules') },
+  { id: 'agents',   label: '.agents/skills (universal standard)', project: '.agents/skills', global: home('.agents', 'skills'),
+    pre: true, keywords: 'codex openai goose block openhands universal standard agents', detect: () => exists('.agents') },
+  { id: 'claude',   label: 'Claude Code', project: '.claude/skills', global: home('.claude', 'skills'),
+    pre: true, keywords: 'anthropic claude', detect: () => exists('.claude') },
+  { id: 'gemini',   label: 'Gemini CLI', project: '.gemini/skills', global: home('.gemini', 'skills'),
+    keywords: 'google gemini', detect: () => exists('.gemini') },
+  { id: 'copilot',  label: 'GitHub Copilot / VS Code', project: '.github/skills', global: home('.copilot', 'skills'),
+    keywords: 'github copilot vscode visual studio microsoft', detect: () => exists('.github') },
+  { id: 'cursor',   label: 'Cursor', project: '.cursor/skills', global: home('.cursor', 'skills'),
+    keywords: 'cursor', detect: () => exists('.cursor') },
+  { id: 'windsurf', label: 'Windsurf', project: '.windsurf/skills', global: home('.codeium', 'windsurf', 'skills'),
+    keywords: 'windsurf codeium cascade', detect: () => exists('.windsurf') },
+  { id: 'opencode', label: 'OpenCode', project: '.opencode/skills', global: home('.config', 'opencode', 'skills'),
+    keywords: 'opencode sst', detect: () => exists('.opencode') },
+  { id: 'cline',    label: 'Cline', project: '.cline/skills', global: home('.cline', 'skills'),
+    keywords: 'cline', detect: () => exists('.cline') || exists('.clinerules') },
+  { id: 'roo',      label: 'Roo Code', project: '.roo/skills', global: home('.roo', 'skills'),
+    keywords: 'roo roocode', detect: () => exists('.roo') },
+  { id: 'junie',    label: 'JetBrains Junie', project: '.junie/skills', global: home('.junie', 'skills'),
+    keywords: 'junie jetbrains intellij', detect: () => exists('.junie') },
+  { id: 'amp',      label: 'Amp (Sourcegraph)', project: '.agents/skills', global: home('.config', 'agents', 'skills'),
+    keywords: 'amp sourcegraph', detect: () => exists('.agents') },
+  { id: 'kiro',     label: 'Kiro (AWS)', project: '.kiro/skills', global: home('.kiro', 'skills'),
+    keywords: 'kiro aws amazon', detect: () => exists('.kiro') },
+  { id: 'trae',     label: 'TRAE (ByteDance)', project: '.trae/skills', global: null,
+    keywords: 'trae bytedance', tag: 'project only', detect: () => exists('.trae') },
+  { id: 'tabnine',  label: 'Tabnine', project: '.tabnine/agent/skills', global: home('.tabnine', 'agent', 'skills'),
+    keywords: 'tabnine', detect: () => exists('.tabnine') },
+  { id: 'factory',  label: 'Factory (Droid)', project: '.factory/skills', global: home('.factory', 'skills'),
+    keywords: 'factory droid', detect: () => exists('.factory') },
 ];
 
-// User-level targets for --global / wizard "machine-wide" (verified home paths).
-const GLOBAL_TARGETS = [
-  { id: 'claude',   label: 'Claude Code (global)',   file: home('.claude', 'CLAUDE.md'), pre: true, keywords: 'anthropic claude' },
-  { id: 'codex',    label: 'Codex (global)',         file: home('.codex', 'AGENTS.md'), pre: true, keywords: 'codex openai agents' },
-  { id: 'opencode', label: 'OpenCode (global)',      file: home('.config', 'opencode', 'AGENTS.md'), pre: true, keywords: 'opencode agents' },
-  { id: 'amp',      label: 'Amp (global)',           file: home('.config', 'amp', 'AGENTS.md'), keywords: 'amp sourcegraph agents' },
-  { id: 'zed',      label: 'Zed (global)',           file: home('.config', 'zed', 'AGENTS.md'), keywords: 'zed agents' },
-  { id: 'gemini',   label: 'Gemini CLI (global)',    file: home('.gemini', 'GEMINI.md'), keywords: 'google gemini' },
-  { id: 'windsurf', label: 'Windsurf (global)',      file: home('.codeium', 'windsurf', 'memories', 'global_rules.md'), keywords: 'windsurf codeium devin' },
-  { id: 'cline',    label: 'Cline (global)',         file: home('Documents', 'Cline', 'Rules', 'humanly.md'), keywords: 'cline' },
-  { id: 'augment',  label: 'Augment (global)',       file: home('.augment', 'rules', 'humanly.md'), keywords: 'augment' },
-  { id: 'goose',    label: 'Goose (global)',         file: home('.config', 'goose', '.goosehints'), keywords: 'goose block' },
-  { id: 'junie',    label: 'Junie (global)',         file: home('.junie', 'AGENTS.md'), keywords: 'junie jetbrains' },
-  { id: 'roo',      label: 'Roo Code (global)',      file: home('.roo', 'rules', 'humanly.md'), keywords: 'roo', tag: 'legacy' },
-];
+// Legacy instruction-file paths from humanly <=0.2.x, which injected a marked text block instead
+// of a skill. We strip that orphaned block on init/remove so upgraders don't get double rules.
+const LEGACY_BLOCK_RE = /<!-- humanly:start[^>]*-->[\s\S]*?<!-- humanly:end -->/;
+const LEGACY_FILES = {
+  project: ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/humanly.mdc', '.github/copilot-instructions.md',
+    'GEMINI.md', '.windsurf/rules/humanly.md', '.clinerules', '.continue/rules/humanly.md',
+    '.augment/rules/humanly.md', '.kilocode/rules/humanly.md', '.trae/rules/project_rules.md',
+    '.junie/AGENTS.md', 'WARP.md', '.goosehints', 'replit.md', '.idx/airules.md',
+    '.tabnine/guidelines/humanly.md', '.sourcegraph/humanly.rule.md', 'best_practices.md',
+    'CONVENTIONS.md', '.roo/rules/humanly.md'],
+  global: [home('.claude', 'CLAUDE.md'), home('.codex', 'AGENTS.md'), home('.config', 'opencode', 'AGENTS.md'),
+    home('.config', 'amp', 'AGENTS.md'), home('.config', 'zed', 'AGENTS.md'), home('.gemini', 'GEMINI.md'),
+    home('.codeium', 'windsurf', 'memories', 'global_rules.md'), home('Documents', 'Cline', 'Rules', 'humanly.md'),
+    home('.augment', 'rules', 'humanly.md'), home('.config', 'goose', '.goosehints'),
+    home('.junie', 'AGENTS.md'), home('.roo', 'rules', 'humanly.md')],
+};
 
 class CancelError extends Error {}
 
-// ---------- core: rules + surgical edits ----------
+// ---------- core: write / remove the skill folder ----------
 
 function exists(rel) {
   try { fs.accessSync(path.resolve(process.cwd(), rel)); return true; } catch { return false; }
 }
 
-function loadRules() {
-  return fs.readFileSync(RULES_PATH, 'utf8').trim();
+function homeExists(file) {
+  try { fs.accessSync(file); return true; } catch { return false; }
 }
 
-function makeBlock(body) {
-  return `${START}\n${NOTE}\n${body.trim()}\n${END}`;
+function loadSkill() {
+  return fs.readFileSync(SKILL_SRC, 'utf8');
 }
 
-// Action a target would take, without writing. 'create' | 'append' | 'update'.
-function planAction(absPath) {
-  if (!fs.existsSync(absPath)) return 'create';
-  const content = fs.readFileSync(absPath, 'utf8');
-  if (BLOCK_RE.test(content)) return 'update';
-  return content.trim() ? 'append' : 'create';
+// The skills PARENT dir for a target at a scope, or null if none documented.
+function dirOf(t, scope) {
+  const d = scope === 'global' ? t.global : t.project;
+  if (!d) return null;
+  return path.isAbsolute(d) ? d : path.resolve(process.cwd(), d);
 }
 
-// Insert or replace the humanly block. Never touches content outside the markers.
-function injectInto(absPath, body, prefixIfNew) {
-  const block = makeBlock(body);
-  const existed = fs.existsSync(absPath);
-  const content = existed ? fs.readFileSync(absPath, 'utf8') : '';
-  let next, action;
-
-  if (BLOCK_RE.test(content)) {
-    next = content.replace(BLOCK_RE, block);
-    action = 'updated';
-  } else if (content.trim()) {
-    next = content.replace(/\s*$/, '') + '\n\n' + block + '\n';
-    action = 'appended';
-  } else {
-    next = (prefixIfNew ? prefixIfNew + '\n\n' : '') + block + '\n';
-    action = 'created';
-  }
-
-  fs.mkdirSync(path.dirname(absPath), { recursive: true });
-  fs.writeFileSync(absPath, next);
-  return action;
+// The folder we actually write/remove: <parent>/humanly.
+function skillDirOf(t, scope) {
+  const parent = dirOf(t, scope);
+  return parent ? path.join(parent, SKILL_NAME) : null;
 }
 
-// Strip ONLY our block. Never delete the file or its directory, even if the file
-// is now empty — the user may have other content there or want to reuse it. We
-// only ever remove our own information, never the file itself.
-function removeFrom(absPath) {
-  if (!fs.existsSync(absPath)) return null;
-  const content = fs.readFileSync(absPath, 'utf8');
-  if (!BLOCK_RE.test(content)) return null;
+// What writing would do, without writing. 'create' | 'update'.
+function planAction(skillDir) {
+  return fs.existsSync(path.join(skillDir, 'SKILL.md')) ? 'update' : 'create';
+}
 
-  const next = content
-    .replace(BLOCK_RE, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\s+/, '')
-    .replace(/\s+$/, '');
-  fs.writeFileSync(absPath, next ? next + '\n' : '');
+// A folder is ours iff it holds a SKILL.md declaring our frontmatter name.
+function isOurs(skillDir) {
+  try { return new RegExp(`name:\\s*${SKILL_ID}\\b`).test(fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8')); }
+  catch { return false; }
+}
+
+// Write SKILL.md into <skillDir>. Returns 'created' | 'updated'.
+function writeSkill(skillDir, body) {
+  const existed = fs.existsSync(path.join(skillDir, 'SKILL.md'));
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), body);
+  return existed ? 'updated' : 'created';
+}
+
+// Delete ONLY our skill folder, and only if it is ours. Never touch sibling skills.
+function removeSkill(skillDir) {
+  if (!fs.existsSync(skillDir) || !isOurs(skillDir)) return null;
+  fs.rmSync(skillDir, { recursive: true, force: true });
   return 'removed';
 }
 
-// ---------- manifest (bookkeeping for exact removal + reproducible re-init) ----------
+// ---------- legacy migration (strip the old injected text block) ----------
+
+// Strip ONLY the old humanly block from an instruction file; keep the file and any other content.
+function stripLegacyBlock(absPath) {
+  if (!fs.existsSync(absPath)) return false;
+  const content = fs.readFileSync(absPath, 'utf8');
+  if (!LEGACY_BLOCK_RE.test(content)) return false;
+  const next = content.replace(LEGACY_BLOCK_RE, '').replace(/\n{3,}/g, '\n\n').replace(/^\s+/, '').replace(/\s+$/, '');
+  fs.writeFileSync(absPath, next ? next + '\n' : '');
+  return true;
+}
+
+// Sweep every legacy instruction file for a scope. Returns the display paths we cleaned.
+function sweepLegacy(scope) {
+  const cleaned = [];
+  for (const f of LEGACY_FILES[scope] || []) {
+    const abs = path.isAbsolute(f) ? f : path.resolve(process.cwd(), f);
+    if (stripLegacyBlock(abs)) cleaned.push(displayPath(abs));
+  }
+  return cleaned;
+}
+
+// ---------- manifest (records exactly what we installed, for clean removal) ----------
 
 function manifestPath(scope) {
   return scope === 'global'
@@ -147,13 +164,9 @@ function readManifest(scope) {
   try { return JSON.parse(fs.readFileSync(manifestPath(scope), 'utf8')); } catch { return null; }
 }
 
-function writeManifest(scope, targets) {
+function writeManifest(scope, entries) {
   const mp = manifestPath(scope);
-  const data = {
-    version: VERSION,
-    scope,
-    targets: targets.map(t => ({ id: t.id, file: t.file, frontmatter: !!t.prefix })),
-  };
+  const data = { version: VERSION, scope, skills: entries };
   fs.mkdirSync(path.dirname(mp), { recursive: true });
   fs.writeFileSync(mp, JSON.stringify(data, null, 2) + '\n');
 }
@@ -164,88 +177,85 @@ function clearManifest(scope) {
 
 // ---------- target resolution ----------
 
-function absOf(file) {
-  return path.isAbsolute(file) ? file : path.resolve(process.cwd(), file);
+function dedupeByDir(arr) {
+  const seen = new Map();
+  for (const x of arr) seen.set(x.dir, x);   // last wins; dir is absolute
+  return [...seen.values()];
 }
 
-function customTarget(file, frontmatter) {
-  return { id: 'custom', label: 'custom: ' + file, file, prefix: frontmatter ? CURSOR_PREFIX : undefined, custom: true };
+function displayPath(p) {
+  return p.startsWith(os.homedir()) ? p.replace(os.homedir(), '~') : path.relative(process.cwd(), p) || p;
 }
 
-function displayPath(file) {
-  return path.isAbsolute(file) ? file.replace(os.homedir(), '~') : file;
+// Resolve selected catalog entries into concrete { id, label, dir } write targets for a scope,
+// dropping any that have no documented path at that scope (e.g. TRAE global), and deduping by dir.
+function resolveTargets(selected, scope) {
+  const out = [];
+  for (const t of selected) {
+    const dir = skillDirOf(t, scope);
+    if (dir) out.push({ id: t.id, label: t.label, dir });
+  }
+  return dedupeByDir(out);
 }
 
 // ---------- apply / undo ----------
 
 function applyInstall(scope, targets, styled = false) {
-  const rules = loadRules();
+  const body = loadSkill();
   const results = [];
-  for (const t of targets) {
-    const action = injectInto(absOf(t.file), rules, t.prefix);
-    results.push({ action, file: t.file });
-  }
-  // merge with anything already in the manifest so re-runs don't forget prior targets
+  for (const t of targets) results.push({ action: writeSkill(t.dir, body), dir: t.dir });
+
   const prev = readManifest(scope);
-  const merged = dedupeByFile([...(prev ? prev.targets : []), ...targets.map(t => ({ id: t.id, file: t.file, frontmatter: !!t.prefix }))]);
-  writeManifest(scope, merged.map(m => ({ id: m.id, file: m.file, prefix: m.frontmatter ? CURSOR_PREFIX : undefined })));
+  const merged = dedupeByDir([...(prev ? prev.skills : []), ...targets.map(t => ({ id: t.id, dir: t.dir }))]);
+  writeManifest(scope, merged.map(m => ({ id: m.id, dir: m.dir })));
+
+  const legacy = sweepLegacy(scope);
 
   if (styled) {
-    for (const r of results) gline(`${c.green(S.tick)} ${c.gray(r.action.padEnd(8))} ${displayPath(r.file)}`);
+    for (const r of results) gline(`${c.green(S.tick)} ${c.gray(r.action.padEnd(8))} ${displayPath(r.dir)}/SKILL.md`);
+    for (const f of legacy) gline(`${c.green(S.tick)} ${c.gray('migrated')} ${f} ${c.gray('(stripped old humanly block)')}`);
     return;
   }
-  console.log(`humanly v${VERSION} — installed clean+lean+honest rules into:`);
-  for (const r of results) console.log(`  ${r.action.padEnd(8)} ${displayPath(r.file)}`);
-  console.log('\nDone. Open a new agent session to pick up the rules.');
+  console.log(`humanly v${VERSION} installed the skill into:`);
+  for (const r of results) console.log(`  ${r.action.padEnd(8)} ${displayPath(r.dir)}/SKILL.md`);
+  for (const f of legacy) console.log(`  migrated ${f} (stripped old humanly block)`);
+  console.log('\nDone. Open a new agent session to pick up the skill.');
   console.log('Undo anytime with: npx humanly remove');
 }
 
-function dedupeByFile(arr) {
-  const seen = new Map();
-  for (const x of arr) seen.set(absOf(x.file), x);
-  return [...seen.values()];
-}
-
-// Every place humanly might live, for a given scope: catalog + manifest, that
-// actually contain our block right now.
+// Every place a humanly skill lives for a scope: catalog + manifest, that is ours right now.
 function findInstalled(scope) {
-  const catalog = scope === 'global' ? GLOBAL_TARGETS : TARGETS;
+  const fromCatalog = TARGETS.map(t => ({ id: t.id, dir: skillDirOf(t, scope) })).filter(x => x.dir);
   const man = readManifest(scope);
-  const candidates = dedupeByFile([
-    ...catalog.map(t => ({ id: t.id, file: t.file })),
-    ...(man ? man.targets.map(t => ({ id: t.id, file: t.file })) : []),
-  ]);
-  return candidates.filter(c => {
-    const abs = absOf(c.file);
-    try { return BLOCK_RE.test(fs.readFileSync(abs, 'utf8')); } catch { return false; }
-  });
+  const candidates = dedupeByDir([...fromCatalog, ...(man ? man.skills : [])]);
+  return candidates.filter(c2 => isOurs(c2.dir));
 }
 
 function applyRemove(scope, targets, styled = false) {
   const removed = [];
-  for (const t of targets) {
-    if (removeFrom(absOf(t.file))) removed.push(displayPath(t.file));
-  }
-  // update manifest: drop removed entries; clear it if nothing humanly-managed remains
+  for (const t of targets) if (removeSkill(t.dir)) removed.push(displayPath(t.dir));
+
   if (findInstalled(scope).length === 0) clearManifest(scope);
   else {
     const man = readManifest(scope);
     if (man) {
-      const goneAbs = new Set(targets.map(t => absOf(t.file)));
-      writeManifest(scope, man.targets.filter(t => !goneAbs.has(absOf(t.file)))
-        .map(t => ({ id: t.id, file: t.file, prefix: t.frontmatter ? CURSOR_PREFIX : undefined })));
+      const gone = new Set(targets.map(t => t.dir));
+      writeManifest(scope, man.skills.filter(s => !gone.has(s.dir)));
     }
   }
+  const legacy = sweepLegacy(scope);
   if (styled) {
-    for (const f of removed) gline(`${c.green(S.tick)} ${c.gray('stripped')} ${f}`);
+    for (const d of removed) gline(`${c.green(S.tick)} ${c.gray('removed')} ${d}`);
+    for (const f of legacy) gline(`${c.green(S.tick)} ${c.gray('migrated')} ${f} ${c.gray('(stripped old humanly block)')}`);
     return;
   }
   if (removed.length) {
-    console.log('humanly — removed the rules block from:');
-    for (const f of removed) console.log('  ' + f);
+    console.log('humanly removed the skill from:');
+    for (const d of removed) console.log('  ' + d);
   } else {
-    console.log('humanly — nothing to remove (no managed block found).');
+    console.log('humanly found no managed skill to remove.');
   }
+  for (const f of legacy) console.log(`  migrated ${f} (stripped old humanly block)`);
 }
 
 // ---------- zero-dep clack-style UI (TTY arrow-keys, numbered fallback) ----------
@@ -297,7 +307,7 @@ function checklist({ message, items, input = process.stdin, output = process.std
       let out = `${c.cyan(S.step, output)}  ${c.bold(message, output)}  ${c.gray('(' + selected.size + ' selected)', output)}\n`;
       out += `${c.gray(S.bar, output)}  ${c.gray('search', output)} ${search}\n`;
       if (!list.length) {
-        out += `${c.gray(S.bar, output)}  ${c.yellow('no matches — keep typing or ⌫ to clear', output)}\n`;
+        out += `${c.gray(S.bar, output)}  ${c.yellow('no matches, keep typing or ⌫ to clear', output)}\n`;
       } else {
         if (start > 0) out += `${c.gray(S.bar, output)}  ${c.gray('↑ ' + start + ' more', output)}\n`;
         for (let i = start; i < end; i++) {
@@ -420,7 +430,7 @@ function question(q, input, output) {
 
 async function runInstallWizard(opts) {
   intro(`humanly  ${c.gray('v' + VERSION)}`);
-  let scope = opts.global ? 'global' : null;
+  let scope = opts.global ? 'global' : opts.local ? 'project' : null;
   if (!scope) {
     const pick = await select({ message: 'Install humanly for', items: [
       { id: 'project', label: 'This project (current folder)' },
@@ -429,79 +439,73 @@ async function runInstallWizard(opts) {
     scope = pick.id;
   }
 
-  const catalog = scope === 'global' ? GLOBAL_TARGETS : TARGETS;
-  const items = catalog.map(t => {
-    const detected = scope === 'global' ? homeExists(t.file) : t.detect();
+  const items = TARGETS.map(t => {
+    const detected = scope === 'global' ? homeExists(dirOf(t, 'global') || '\0') : t.detect();
+    const noPath = !dirOf(t, scope);
     return {
       ...t,
-      checked: t.pre || detected,
-      hint: (detected && !t.pre) ? 'detected' : (t.tag || null),
+      checked: !noPath && (t.pre || detected),
+      hint: noPath ? 'no path at this scope' : ((detected && !t.pre) ? 'detected' : (t.tag || null)),
     };
   });
-  const selected = await checklist({ message: `Select agents (${scope}) — type to search`, items });
-  let chosen = dedupeByFile(selected);
-  if (!chosen.length) { outro(c.yellow('Nothing selected. Nothing changed.')); return; }
+  const selected = await checklist({ message: `Select agents (${scope}), type to search`, items });
+  const targets = resolveTargets(selected, scope);
+  if (!targets.length) { outro(c.yellow('Nothing to install (none selected, or no path at this scope).')); return; }
 
-  // preview
   gline(c.bold('Planned changes'));
-  for (const t of chosen) {
-    const a = planAction(absOf(t.file));
-    const tag = a === 'create' ? c.green('create ') : a === 'update' ? c.cyan('update ') : c.yellow('append ');
-    gline(`${tag} ${displayPath(t.file)}`);
+  for (const t of targets) {
+    const a = planAction(t.dir);
+    const tag = a === 'create' ? c.green('create ') : c.cyan('update ');
+    gline(`${tag} ${displayPath(t.dir)}/SKILL.md`);
   }
   gline();
   if (!(await confirm({ message: 'Proceed?', def: true }))) { outro(c.yellow('Cancelled. Nothing changed.')); return; }
 
-  applyInstall(scope, chosen, true);
-  outro(`${c.green('Done.')} Open a new agent session to pick up the rules. Undo: ${c.cyan('npx humanly remove')}`);
+  applyInstall(scope, targets, true);
+  outro(`${c.green('Done.')} Open a new agent session to pick up the skill. Undo: ${c.cyan('npx humanly remove')}`);
 }
 
 async function runRemoveWizard(opts) {
   intro(`humanly remove  ${c.gray('v' + VERSION)}`);
-  const scopes = opts.global ? ['global'] : ['project', 'global'];
+  const scopes = opts.global ? ['global'] : opts.local ? ['project'] : ['project', 'global'];
   let found = [];
   for (const s of scopes) found.push(...findInstalled(s).map(t => ({ ...t, scope: s })));
   if (!found.length) { outro('Nothing installed to remove.'); return; }
 
-  const items = found.map(t => ({ ...t, checked: true, label: `${displayPath(t.file)}  ${c.gray('(' + t.scope + ')')}`, shortLabel: displayPath(t.file) }));
+  const items = found.map(t => ({ ...t, checked: true, label: `${displayPath(t.dir)}  ${c.gray('(' + t.scope + ')')}`, shortLabel: displayPath(t.dir) }));
   const chosen = await checklist({ message: 'Remove humanly from', items });
   if (!chosen.length) { outro(c.yellow('Nothing selected. Nothing changed.')); return; }
-  if (!(await confirm({ message: `Remove from ${chosen.length} file(s)? (only our block; files are kept)`, def: true }))) { outro(c.yellow('Cancelled. Nothing changed.')); return; }
+  if (!(await confirm({ message: `Remove from ${chosen.length} location(s)? (only our skill folder)`, def: true }))) { outro(c.yellow('Cancelled. Nothing changed.')); return; }
 
   for (const s of scopes) {
     const forScope = chosen.filter(c2 => c2.scope === s);
     if (forScope.length) applyRemove(s, forScope, true);
   }
-  outro(`${c.green('Removed.')} Your files are intact, only humanly's block was stripped.`);
-}
-
-function homeExists(file) {
-  try { fs.accessSync(file); return true; } catch { return false; }
+  outro(`${c.green('Removed.')} Only humanly's skill folder was deleted; other skills are intact.`);
 }
 
 // ---------- commands ----------
 
 function nonInteractiveTargets(opts) {
   const scope = opts.global ? 'global' : 'project';
-  const catalog = scope === 'global' ? GLOBAL_TARGETS : TARGETS;
-  let known;
-  if (opts.only) known = catalog.filter(t => opts.only.includes(t.id));
-  else if (opts.all) known = catalog.slice();
-  else known = catalog.filter(t => (scope === 'global' ? (t.pre || homeExists(t.file)) : (t.pre || t.detect())));
-  const customs = (opts.add || []).map(a => customTarget(a.file, a.fm));
-  return { scope, targets: dedupeByFile([...known, ...customs]) };
+  let selected;
+  if (opts.only) selected = TARGETS.filter(t => opts.only.includes(t.id));
+  else if (opts.all) selected = TARGETS.slice();
+  else selected = TARGETS.filter(t => (scope === 'global' ? (t.pre || homeExists(dirOf(t, 'global') || '\0')) : (t.pre || t.detect())));
+  return { scope, targets: resolveTargets(selected, scope) };
 }
 
 async function cmdInit(opts) {
-  const wizard = process.stdin.isTTY && !opts.all && !opts.only && !opts.add && !opts.yes;
+  const wizard = process.stdin.isTTY && !opts.all && !opts.only && !opts.yes;
   if (wizard) {
     try { await runInstallWizard(opts); }
     catch (e) { if (e instanceof CancelError) console.log('\nCancelled. Nothing changed.'); else throw e; }
     return;
   }
   const { scope, targets } = nonInteractiveTargets(opts);
-  if (!process.stdin.isTTY && !opts.all && !opts.only && !opts.add)
-    console.log('(no interactive terminal — installing detected defaults; use --all/--only to choose)');
+  if (!process.stdin.isTTY && !opts.all && !opts.only)
+    console.log('(no interactive terminal, installing detected defaults; use --all/--only to choose)');
+  if (!targets.length) { console.log('humanly found no agents to install into (try --all or --only).'); return; }
   applyInstall(scope, targets);
 }
 
@@ -518,8 +522,13 @@ async function cmdRemove(opts) {
   applyRemove(scope, targets);
 }
 
+// The raw ruleset = the skill body with its YAML frontmatter stripped.
+function rulesBody() {
+  return loadSkill().replace(/^---[\s\S]*?---\n+/, '').trim();
+}
+
 function cmdRules(opts) {
-  const rules = loadRules();
+  const rules = rulesBody();
   if (opts.out) {
     const abs = path.resolve(process.cwd(), opts.out);
     fs.writeFileSync(abs, rules + '\n');
@@ -534,13 +543,15 @@ function cmdRules(opts) {
 }
 
 function cmdList() {
-  console.log(`humanly v${VERSION} — agent catalog (project scope):`);
+  console.log(`humanly v${VERSION} skills-compatible agent catalog:`);
   for (const t of TARGETS) {
     const on = t.pre || t.detect();
-    console.log(`  [${on ? 'x' : ' '}] ${t.id.padEnd(9)} ${t.file}${t.detect() && !t.pre ? '  (detected)' : ''}`);
+    const g = t.global ? displayPath(skillDirOf(t, 'global')) : 'n/a';
+    console.log(`  [${on ? 'x' : ' '}] ${t.id.padEnd(9)} project: ${(t.project + '/humanly').padEnd(30)} global: ${g}${t.detect() && !t.pre ? '  (detected)' : ''}`);
   }
-  console.log('\n[x] = pre-selected on a bare `init`. Run `npx humanly` for the wizard,');
-  console.log('`init --all` for everything, `init --global` for machine-wide, `init --add <path>` for custom.');
+  console.log('\n[x] = pre-selected/detected on a bare `init`. `npx humanly` for the wizard,');
+  console.log('`init --all` for every tool, `init --global` for machine-wide. The `agents` entry');
+  console.log('(.agents/skills) is the cross-tool standard read by Codex, Goose, OpenHands and more.');
 }
 
 function copyToClipboard(text) {
@@ -557,47 +568,47 @@ function copyToClipboard(text) {
 }
 
 function parse(argv) {
-  const opts = { _: [], add: [] };
+  const opts = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--all') opts.all = true;
     else if (a === '--global' || a === '-g') opts.global = true;
+    else if (a === '--local' || a === '-l') opts.local = true;
     else if (a === '--yes' || a === '-y') opts.yes = true;
     else if (a === '--copy' || a === '-c') opts.copy = true;
     else if (a === '--out' || a === '-o') opts.out = argv[++i];
     else if (a === '--only') opts.only = (argv[++i] || '').split(',').map(s => s.trim()).filter(Boolean);
-    else if (a === '--add') { let v = argv[++i] || ''; const fm = /:fm$/.test(v); if (fm) v = v.replace(/:fm$/, ''); if (v) opts.add.push({ file: v, fm }); }
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--version' || a === '-v') opts.version = true;
     else opts._.push(a);
   }
-  if (!opts.add.length) delete opts.add;
   return opts;
 }
 
-const HELP = `humanly v${VERSION} — make every AI agent write clean, lean, honest.
+const HELP = `humanly v${VERSION}. Make every AI agent write clean, lean, honest.
 
   npx humanly                 Interactive wizard: pick scope + agents, then install
   npx humanly init            Same wizard (auto-detects your agents)
-  npx humanly init --all      Non-interactive: install into every catalog file
-  npx humanly init --only ids Install into specific ones (e.g. --only agents,cursor)
-  npx humanly init --global   Machine-wide files (~/.claude, ~/.codex, ~/.config/opencode, ...)
-  npx humanly init --add p[:fm]  Add a custom file (':fm' = Cursor-style frontmatter)
-  npx humanly remove          Interactive: pick which installs to surgically remove
-  npx humanly remove --all    Remove every humanly block it can find
+  npx humanly init --all      Non-interactive: install into every catalog tool
+  npx humanly init --only ids Install into specific ones (e.g. --only claude,agents,cursor)
+  npx humanly init --global   Machine-wide skills dirs (~/.claude/skills, ~/.agents/skills, ...)
+  npx humanly init --local    Force project scope (current folder)
+  npx humanly remove          Interactive: pick which installs to remove
+  npx humanly remove --all    Remove every humanly skill it can find
   npx humanly rules [--copy|--out F]  Print/copy/save the raw ruleset
   npx humanly list            Show the agent catalog and what's detected
 
-Surgical: installs append a marked block (never replace your files); remove strips
-only that block. AGENTS.md is read by Codex, OpenCode, Amp, Zed, Kilo, Trae and
-Claude Code (fallback); the rest get their native file.`;
+Installs a SKILL.md folder into each tool's native skills directory. SKILL.md is an open
+standard; the .agents/skills entry covers Codex, Goose, OpenHands and other cross-tool readers.
+Remove deletes only humanly's own skill folder, never your other skills. Upgrading from <=0.2.x
+also strips the old injected text block from your instruction files.`;
 
 async function main() {
   const opts = parse(process.argv.slice(2));
   if (opts.version) return console.log(VERSION);
-  const cmd = opts._[0];
   if (opts.help) return console.log(HELP);
-  if (!cmd) return cmdInit(opts);           // bare `npx humanly` → wizard
+  const cmd = opts._[0];
+  if (!cmd) return cmdInit(opts);
   switch (cmd) {
     case 'init': return cmdInit(opts);
     case 'remove': case 'uninstall': return cmdRemove(opts);
@@ -611,7 +622,7 @@ async function main() {
   }
 }
 
-module.exports = { injectInto, removeFrom, planAction, findInstalled, nonInteractiveTargets, checklist, BLOCK_RE, manifestPath, makeBlock };
+module.exports = { writeSkill, removeSkill, planAction, isOurs, findInstalled, nonInteractiveTargets, resolveTargets, checklist, skillDirOf, manifestPath, stripLegacyBlock, sweepLegacy, TARGETS };
 
 if (require.main === module) {
   main().catch(e => { console.error(e.message); process.exit(1); });

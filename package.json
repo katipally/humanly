@@ -1,14 +1,15 @@
 {
   "name": "humanly",
-  "version": "0.2.3",
-  "description": "Make every AI agent write humanly: clean (no AI tells), lean (fewer tokens), honest. One ruleset, installed into every agent's instruction file via npx.",
+  "version": "0.3.0",
+  "description": "Make every AI agent write humanly: clean (no AI tells), lean (fewer tokens), honest. One Agent Skill (SKILL.md), installed into every tool's skills directory via npx.",
   "bin": {
     "humanly": "bin/humanly.js"
   },
   "files": [
     "bin",
     "src",
-    "HUMANLY.md"
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "test": "node test/smoke.js"
@@ -17,7 +18,8 @@
     "ai",
     "writing",
     "agents",
-    "agents.md",
+    "agent-skills",
+    "skill.md",
     "claude",
     "codex",
     "opencode",
