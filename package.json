@@ -1,0 +1,39 @@
+{
+  "name": "humanly",
+  "version": "0.1.0",
+  "description": "Make every AI agent write humanly: clean (no AI tells), lean (fewer tokens), honest. One ruleset, installed into every agent's instruction file via npx.",
+  "bin": {
+    "humanly": "bin/humanly.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "HUMANLY.md"
+  ],
+  "scripts": {
+    "test": "node test/smoke.js"
+  },
+  "keywords": [
+    "ai",
+    "writing",
+    "agents",
+    "agents.md",
+    "claude",
+    "codex",
+    "opencode",
+    "cursor",
+    "copilot",
+    "prose",
+    "tokens"
+  ],
+  "author": "Yashwanth Reddy",
+  "license": "MIT",
+  "homepage": "https://github.com/katipally/humanly",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/katipally/humanly.git"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
