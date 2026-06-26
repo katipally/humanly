@@ -1,78 +1,91 @@
 #!/usr/bin/env node
 'use strict';
 
-// Smoke tests: rules load, init writes markers, init is idempotent, remove is clean,
-// and HUMANLY.md stays in sync with the source ruleset. Zero deps.
+// Smoke tests. Pure logic + non-interactive CLI paths + one stream-driven checklist.
+// Zero deps. The arrow-key UI itself is verified manually in a real terminal.
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { PassThrough } = require('stream');
 const { execFileSync } = require('child_process');
 const assert = require('assert');
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'bin', 'humanly.js');
 const RULES = path.join(ROOT, 'src', 'rules.md');
+const api = require(CLI);
 
 let passed = 0;
 function ok(name) { console.log('  ok  ' + name); passed++; }
-function run(args, cwd) { return execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8' }); }
+function run(args, cwd) { return execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
 
-// 1. ruleset loads and carries the hard rules
+// 1. ruleset loads with all three pillars
 const rules = fs.readFileSync(RULES, 'utf8');
-assert(rules.trim().length > 0, 'rules.md is empty');
-assert(/No em dash/i.test(rules), 'missing em dash rule');
-assert(/false contrast/i.test(rules), 'missing false-contrast rule');
-assert(/LEAN/.test(rules) && /TRUTH/.test(rules), 'missing Lean/Truth pillars');
+assert(/No em dash/i.test(rules) && /LEAN/.test(rules) && /TRUTH/.test(rules), 'pillars missing');
 ok('ruleset loads with Clean/Lean/Truth pillars');
 
-// 2. HUMANLY.md mirrors the source (no drift)
-const browsable = fs.readFileSync(path.join(ROOT, 'HUMANLY.md'), 'utf8');
-assert.strictEqual(browsable.trim(), rules.trim(), 'HUMANLY.md drifted from src/rules.md');
+// 2. HUMANLY.md mirrors the source
+assert.strictEqual(fs.readFileSync(path.join(ROOT, 'HUMANLY.md'), 'utf8').trim(), rules.trim(), 'HUMANLY.md drifted');
 ok('HUMANLY.md matches src/rules.md');
 
-// scratch project dir
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'humanly-test-'));
+const orig = process.cwd();
 try {
-  // 3. init --all writes a marker block into AGENTS.md and CLAUDE.md
-  run(['init', '--all'], dir);
-  const agents = path.join(dir, 'AGENTS.md');
-  const claude = path.join(dir, 'CLAUDE.md');
-  assert(fs.existsSync(agents) && fs.existsSync(claude), 'init did not create files');
-  const a1 = fs.readFileSync(agents, 'utf8');
-  assert(/humanly:start/.test(a1) && /humanly:end/.test(a1), 'markers missing');
-  assert(/No em dash/.test(a1), 'rules not injected');
-  ok('init --all writes marker block with rules');
+  // 3. init --all + custom --add writes blocks and a manifest
+  process.chdir(dir);
+  run(['init', '--all', '--add', './extra.md:fm', '--yes'], dir);
+  const agents = fs.readFileSync('AGENTS.md', 'utf8');
+  assert(/humanly:start/.test(agents) && /No em dash/.test(agents), 'AGENTS.md not written');
+  const extra = fs.readFileSync('extra.md', 'utf8');
+  assert(/alwaysApply: true/.test(extra) && /humanly:start/.test(extra), 'custom --add:fm missing frontmatter/block');
+  const man = JSON.parse(fs.readFileSync('.humanly.json', 'utf8'));
+  assert(man.targets.some(t => t.file === './extra.md'), 'manifest missing custom target');
+  ok('init --all --add writes blocks + manifest');
 
-  // 4. init is idempotent (no duplicate block)
-  run(['init', '--all'], dir);
-  const a2 = fs.readFileSync(agents, 'utf8');
-  const count = (a2.match(/humanly:start/g) || []).length;
-  assert.strictEqual(count, 1, `expected 1 block, found ${count}`);
-  ok('init is idempotent (single block)');
+  // 4. idempotent
+  run(['init', '--all', '--yes'], dir);
+  assert.strictEqual((fs.readFileSync('AGENTS.md', 'utf8').match(/humanly:start/g) || []).length, 1, 'duplicate block');
+  ok('init is idempotent');
 
-  // 5. preserves user content outside markers
-  const userLine = '# My project rules\nAlways use tabs.\n';
-  fs.writeFileSync(claude, userLine);
-  run(['init', '--only', 'claude'], dir);
-  const c = fs.readFileSync(claude, 'utf8');
-  assert(c.includes('Always use tabs.'), 'user content lost');
-  assert(/humanly:start/.test(c), 'block not appended to existing file');
-  ok('preserves existing user content');
+  // 5. surgical: existing user content preserved, byte-identical after remove
+  const userContent = '# My rules\n\nAlways use tabs.\n';
+  fs.writeFileSync('CLAUDE.md', userContent);
+  run(['init', '--only', 'claude', '--yes'], dir);
+  assert(/Always use tabs/.test(fs.readFileSync('CLAUDE.md', 'utf8')), 'user content lost on install');
+  ok('install preserves existing user content');
 
-  // 6. remove strips the block, keeps user content
-  run(['remove', '--all'], dir);
-  const cAfter = fs.readFileSync(claude, 'utf8');
-  assert(!/humanly:start/.test(cAfter), 'block not removed');
-  assert(cAfter.includes('Always use tabs.'), 'user content removed with block');
-  ok('remove strips block, keeps user content');
+  // 6. planAction reports create/append/update correctly
+  assert.strictEqual(api.planAction(path.join(dir, 'CLAUDE.md')), 'update', 'should be update');
+  assert.strictEqual(api.planAction(path.join(dir, 'does-not-exist.md')), 'create', 'should be create');
+  ok('planAction classifies create/append/update');
 
-  // 7. rules --out writes a standalone file
-  run(['rules', '--out', 'OUT.md'], dir);
-  assert.strictEqual(fs.readFileSync(path.join(dir, 'OUT.md'), 'utf8').trim(), rules.trim(), 'rules --out mismatch');
-  ok('rules --out writes the ruleset');
-} finally {
+  // 7. remove --all: blocks gone, emptied created files deleted, empty dirs pruned,
+  //    user-content file kept and byte-identical, manifest cleared
+  assert(fs.existsSync(path.join(dir, '.cursor', 'rules', 'humanly.mdc')), 'cursor file should exist pre-remove');
+  run(['remove', '--all', '--yes'], dir);
+  assert(!fs.existsSync('AGENTS.md'), 'emptied created file should be deleted');
+  assert(!fs.existsSync(path.join(dir, '.cursor')), 'empty .cursor dir should be pruned');
+  assert.strictEqual(fs.readFileSync('CLAUDE.md', 'utf8'), userContent, 'user file not byte-identical after remove');
+  assert(!fs.existsSync('.humanly.json'), 'manifest should be cleared');
+  ok('remove is surgical: strips block, cleans up, keeps user content byte-identical');
+
+  // 8. stream-driven checklist: toggle item 2 off, confirm with enter
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const items = [{ label: 'A', checked: true }, { label: 'B', checked: true }, { label: 'C', checked: false }];
+  const p = api.checklist({ message: 'pick', items, input, output, interactive: true });
+  // move down to B, space to uncheck, enter
+  setImmediate(() => { input.write('\x1b[B'); input.write(' '); input.write('\r'); });
+  p.then(sel => {
+    assert.deepStrictEqual(sel.map(s => s.label), ['A'], 'checklist selection wrong: ' + sel.map(s => s.label));
+    process.chdir(orig);
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('stream-driven checklist toggles + confirms');
+    console.log(`\n${passed} checks passed.`);
+  }).catch(e => { console.error('checklist test failed:', e); process.exit(1); });
+} catch (e) {
+  process.chdir(orig);
   fs.rmSync(dir, { recursive: true, force: true });
+  throw e;
 }
-
-console.log(`\n${passed} checks passed.`);

@@ -2,11 +2,13 @@
 
 Make every AI agent write **humanly**: clean (no AI tells), lean (fewer tokens), honest.
 
-One tight ruleset, installed into every agent's instruction file with a single command. No plugin, no vendor lock-in, no Claude bias. Works in Claude Code, Codex, OpenCode, Cursor, Copilot, Gemini CLI, Windsurf, Cline, and anything that reads `AGENTS.md`.
+One tight ruleset, installed into every agent's instruction file with a single command. No plugin, no vendor lock-in, no Claude bias. Works in Claude Code, Codex, OpenCode, Cursor, Copilot, Gemini CLI, Windsurf, Cline, Kilo, Trae, and anything that reads `AGENTS.md`.
 
 ```bash
-npx humanly init
+npx humanly
 ```
+
+That opens a short wizard: pick scope (this project or your whole machine), check the agents you use (detected ones are pre-checked), optionally add a custom file, preview the changes, confirm. Zero dependencies, nothing to download.
 
 ## Why
 
@@ -22,19 +24,37 @@ It doesn't run the model or rewrite output. It puts the rules where the agent al
 
 ## Use it
 
-**1. Install into this project**
+**1. The wizard (recommended)**
 
 ```bash
-npx humanly init
+npx humanly
 ```
 
-Writes the rules into `AGENTS.md` and `CLAUDE.md`, plus any other agent files it detects (`.cursor/`, `.github/`, `.windsurf/`, `.clinerules`, `GEMINI.md`). Open a new agent session and it writes clean from the first token.
+```
+Install humanly for:
+> (•) This project (current folder)
+  ( ) Globally (your whole machine)
+
+Select agents to set up (project):
+  [x] AGENTS.md hub (Codex, OpenCode, Amp, Zed, Kilo, Trae, Jules)
+  [x] Claude Code
+  [x] Cursor   (detected)
+  [ ] GitHub Copilot
+  ...
+  ↑/↓ move · space toggle · a all · enter confirm · esc cancel
+```
+
+It detects the agents you already use, lets you toggle any others, add a custom file it doesn't know about, and shows a preview (`create` / `append to` / `update in`) before it writes anything.
+
+**Scriptable flags** (no prompts, for CI or dotfiles):
 
 ```bash
-npx humanly init --all       # every known agent file, detected or not
-npx humanly init --global    # user-level: ~/.claude, ~/.codex, ~/.config/opencode, ~/.gemini
-npx humanly init --only cursor
-npx humanly list             # dry run: show what init would write
+npx humanly init --all              # every catalog file
+npx humanly init --only agents,cursor
+npx humanly init --global           # ~/.claude, ~/.codex, ~/.config/opencode, ~/.gemini
+npx humanly init --add ./STYLE.md   # a custom file (append :fm for Cursor-style frontmatter)
+npx humanly init --all --yes        # skip the confirm
+npx humanly list                    # show the catalog and what's detected
 ```
 
 **2. Copy the rules by hand (any agent, even unsupported ones)**
@@ -47,13 +67,14 @@ npx humanly rules --out HUMANLY.md
 
 Or just open [`HUMANLY.md`](./HUMANLY.md) and paste it anywhere.
 
-**3. Undo**
+**3. Undo (surgical)**
 
 ```bash
-npx humanly remove
+npx humanly remove           # wizard: lists only real installs, you pick which
+npx humanly remove --all --yes
 ```
 
-Strips only the managed block (between `<!-- humanly:start -->` and `<!-- humanly:end -->`). Your own content stays.
+Remove scans everywhere humanly actually lives, then strips **only** its own block. If a file it created becomes empty, it deletes it; if a directory it created (`.cursor/rules`, `.windsurf/rules`, `.roo/rules`) is left empty, it prunes it. A file with your own content comes back byte-for-byte identical.
 
 ## Where it writes
 
@@ -61,7 +82,7 @@ Strips only the managed block (between `<!-- humanly:start -->` and `<!-- humanl
 
 | Agent | File |
 |---|---|
-| Codex, OpenCode, Amp, Zed, VS Code, Jules | `AGENTS.md` |
+| Codex, OpenCode, Amp, Zed, Kilo, Trae, Jules, VS Code | `AGENTS.md` |
 | Claude Code | `CLAUDE.md` (also reads `AGENTS.md`) |
 | OpenCode (global) | `~/.config/opencode/AGENTS.md` |
 | Gemini CLI | `GEMINI.md` |
@@ -69,8 +90,14 @@ Strips only the managed block (between `<!-- humanly:start -->` and `<!-- humanl
 | Cursor | `.cursor/rules/humanly.mdc` |
 | Windsurf | `.windsurf/rules/humanly.md` |
 | Cline | `.clinerules` |
+| Roo Code (legacy) | `.roo/rules/humanly.md` |
+| anything else | `npx humanly init --add <path>` |
 
 Installs are idempotent. Re-running `init` updates the block in place, never duplicates it.
+
+## Safe by design
+
+humanly only ever touches its own marked block. It **appends**, never replaces: your existing instructions, comments, and frontmatter are left untouched, and on remove the file returns to exactly what it was. A small `.humanly.json` records what was installed so removal is precise (delete it anytime; remove still scans the catalog as a fallback).
 
 ## Honest note on "100%"
 
