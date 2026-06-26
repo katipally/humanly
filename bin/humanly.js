@@ -23,26 +23,52 @@ const BLOCK_RE = /<!-- humanly:start[^>]*-->[\s\S]*?<!-- humanly:end -->/;
 // Cursor's modern rule files use frontmatter to apply automatically.
 const CURSOR_PREFIX = '---\ndescription: Write clean, lean, honest prose (humanly)\nalwaysApply: true\n---';
 
-// Project-level catalog. `pre` = pre-checked in the wizard. `detect` flips pre on
-// when the agent's footprint is found. AGENTS.md is the hub many tools read.
+const home = (...p) => path.join(os.homedir(), ...p);
+
+// Project-level catalog (verified file paths, Jun 2026). `pre` = pre-checked in the
+// wizard. `detect` flips pre on when the agent's footprint is found. `keywords` make
+// an agent findable by brand in search even when it shares a file. `tag` shows a note.
+// AGENTS.md is the Linux-Foundation standard read by many tools; agents with their own
+// native file get a dedicated entry instead.
 const TARGETS = [
-  { id: 'agents',   label: 'AGENTS.md hub (Codex, OpenCode, Amp, Zed, Kilo, Trae, Jules)', file: 'AGENTS.md', pre: true, detect: () => true },
-  { id: 'claude',   label: 'Claude Code', file: 'CLAUDE.md', pre: true, detect: () => true },
-  { id: 'cursor',   label: 'Cursor', file: '.cursor/rules/humanly.mdc', prefix: CURSOR_PREFIX, detect: () => exists('.cursor') || exists('.cursorrules') },
-  { id: 'copilot',  label: 'GitHub Copilot', file: '.github/copilot-instructions.md', detect: () => exists('.github') },
-  { id: 'gemini',   label: 'Gemini CLI', file: 'GEMINI.md', detect: () => exists('GEMINI.md') || exists('.gemini') },
-  { id: 'windsurf', label: 'Windsurf', file: '.windsurf/rules/humanly.md', detect: () => exists('.windsurf') || exists('.windsurfrules') },
-  { id: 'cline',    label: 'Cline', file: '.clinerules', detect: () => exists('.clinerules') },
-  { id: 'roo',      label: 'Roo Code (legacy)', file: '.roo/rules/humanly.md', detect: () => exists('.roo') || exists('.roorules') },
+  { id: 'agents',   label: 'AGENTS.md — universal standard', file: 'AGENTS.md', pre: true, detect: () => true,
+    keywords: 'codex opencode amp sourcegraph zed devin jules factory droid openhands universal standard' },
+  { id: 'claude',   label: 'Claude Code', file: 'CLAUDE.md', pre: true, detect: () => true, keywords: 'anthropic claude' },
+  { id: 'cursor',   label: 'Cursor', file: '.cursor/rules/humanly.mdc', prefix: CURSOR_PREFIX, keywords: 'cursor', detect: () => exists('.cursor') || exists('.cursorrules') },
+  { id: 'copilot',  label: 'GitHub Copilot', file: '.github/copilot-instructions.md', keywords: 'github copilot vscode visual studio', detect: () => exists('.github') },
+  { id: 'gemini',   label: 'Gemini CLI', file: 'GEMINI.md', keywords: 'google gemini', detect: () => exists('GEMINI.md') || exists('.gemini') },
+  { id: 'windsurf', label: 'Windsurf / Devin Desktop', file: '.windsurf/rules/humanly.md', keywords: 'windsurf devin cascade codeium', detect: () => exists('.windsurf') || exists('.windsurfrules') || exists('.devin') },
+  { id: 'cline',    label: 'Cline', file: '.clinerules', keywords: 'cline', detect: () => exists('.clinerules') },
+  { id: 'continue', label: 'Continue.dev', file: '.continue/rules/humanly.md', keywords: 'continue', detect: () => exists('.continue') },
+  { id: 'augment',  label: 'Augment Code', file: '.augment/rules/humanly.md', keywords: 'augment', detect: () => exists('.augment') || exists('.augment-guidelines') },
+  { id: 'kilo',     label: 'Kilo Code', file: '.kilocode/rules/humanly.md', keywords: 'kilo kilocode', detect: () => exists('.kilocode') },
+  { id: 'trae',     label: 'Trae', file: '.trae/rules/project_rules.md', keywords: 'trae bytedance', detect: () => exists('.trae') },
+  { id: 'junie',    label: 'JetBrains Junie', file: '.junie/AGENTS.md', keywords: 'junie jetbrains intellij', detect: () => exists('.junie') },
+  { id: 'warp',     label: 'Warp', file: 'WARP.md', keywords: 'warp terminal', detect: () => exists('WARP.md') },
+  { id: 'goose',    label: 'Goose (Block)', file: '.goosehints', keywords: 'goose block', detect: () => exists('.goosehints') },
+  { id: 'replit',   label: 'Replit Agent', file: 'replit.md', keywords: 'replit', detect: () => exists('replit.md') || exists('.replit') },
+  { id: 'firebase', label: 'Firebase Studio (ex Project IDX)', file: '.idx/airules.md', keywords: 'firebase studio idx project airules google', detect: () => exists('.idx') },
+  { id: 'tabnine',  label: 'Tabnine', file: '.tabnine/guidelines/humanly.md', keywords: 'tabnine', detect: () => exists('.tabnine') },
+  { id: 'cody',     label: 'Sourcegraph Cody', file: '.sourcegraph/humanly.rule.md', keywords: 'sourcegraph cody', tag: 'enterprise', detect: () => exists('.sourcegraph') },
+  { id: 'qodo',     label: 'Qodo (ex CodiumAI)', file: 'best_practices.md', keywords: 'qodo codium', detect: () => exists('best_practices.md') },
+  { id: 'aider',    label: 'Aider', file: 'CONVENTIONS.md', keywords: 'aider', tag: 'add to .aider.conf.yml read:', detect: () => exists('.aider.conf.yml') || exists('.aider.conf.yaml') },
+  { id: 'roo',      label: 'Roo Code', file: '.roo/rules/humanly.md', keywords: 'roo roocode', tag: 'legacy', detect: () => exists('.roo') || exists('.roorules') },
 ];
 
-// User-level targets for --global / wizard "machine-wide".
+// User-level targets for --global / wizard "machine-wide" (verified home paths).
 const GLOBAL_TARGETS = [
-  { id: 'claude',   label: 'Claude Code (global)',   file: path.join(os.homedir(), '.claude', 'CLAUDE.md'), pre: true },
-  { id: 'codex',    label: 'Codex (global)',         file: path.join(os.homedir(), '.codex', 'AGENTS.md'), pre: true },
-  { id: 'opencode', label: 'OpenCode (global)',      file: path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md'), pre: true },
-  { id: 'gemini',   label: 'Gemini CLI (global)',    file: path.join(os.homedir(), '.gemini', 'GEMINI.md') },
-  { id: 'roo',      label: 'Roo Code (global, legacy)', file: path.join(os.homedir(), '.roo', 'rules', 'humanly.md') },
+  { id: 'claude',   label: 'Claude Code (global)',   file: home('.claude', 'CLAUDE.md'), pre: true, keywords: 'anthropic claude' },
+  { id: 'codex',    label: 'Codex (global)',         file: home('.codex', 'AGENTS.md'), pre: true, keywords: 'codex openai agents' },
+  { id: 'opencode', label: 'OpenCode (global)',      file: home('.config', 'opencode', 'AGENTS.md'), pre: true, keywords: 'opencode agents' },
+  { id: 'amp',      label: 'Amp (global)',           file: home('.config', 'amp', 'AGENTS.md'), keywords: 'amp sourcegraph agents' },
+  { id: 'zed',      label: 'Zed (global)',           file: home('.config', 'zed', 'AGENTS.md'), keywords: 'zed agents' },
+  { id: 'gemini',   label: 'Gemini CLI (global)',    file: home('.gemini', 'GEMINI.md'), keywords: 'google gemini' },
+  { id: 'windsurf', label: 'Windsurf (global)',      file: home('.codeium', 'windsurf', 'memories', 'global_rules.md'), keywords: 'windsurf codeium devin' },
+  { id: 'cline',    label: 'Cline (global)',         file: home('Documents', 'Cline', 'Rules', 'humanly.md'), keywords: 'cline' },
+  { id: 'augment',  label: 'Augment (global)',       file: home('.augment', 'rules', 'humanly.md'), keywords: 'augment' },
+  { id: 'goose',    label: 'Goose (global)',         file: home('.config', 'goose', '.goosehints'), keywords: 'goose block' },
+  { id: 'junie',    label: 'Junie (global)',         file: home('.junie', 'AGENTS.md'), keywords: 'junie jetbrains' },
+  { id: 'roo',      label: 'Roo Code (global)',      file: home('.roo', 'rules', 'humanly.md'), keywords: 'roo', tag: 'legacy' },
 ];
 
 class CancelError extends Error {}
@@ -244,44 +270,69 @@ function gline(text = '', output = process.stdout) { output.write(c.gray(S.bar, 
 function rawOn(input) { readline.emitKeypressEvents(input); if (input.isTTY && input.setRawMode) input.setRawMode(true); }
 function rawOff(input, onKey) { input.removeListener('keypress', onKey); if (input.isTTY && input.setRawMode) input.setRawMode(false); }
 
-function checklist({ message, items, input = process.stdin, output = process.stdout, interactive = input.isTTY }) {
+function checklist({ message, items, input = process.stdin, output = process.stdout, interactive = input.isTTY, pageSize = 12 }) {
   if (!interactive) return numberedChecklist({ message, items, input, output });
   return new Promise((resolve, reject) => {
+    const selected = new Set(items.filter(it => it.checked));
+    let query = '';
     let idx = 0;
-    const state = items.map(it => !!it.checked);
     let lines = 0;
     rawOn(input);
 
+    const filtered = () => {
+      if (!query) return items;
+      const q = query.toLowerCase();
+      return items.filter(it => it.label.toLowerCase().includes(q) || (it.keywords || '').toLowerCase().includes(q));
+    };
+
     const render = () => {
       if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
-      let out = `${c.cyan(S.step, output)}  ${c.bold(message, output)}  ${c.gray('↑↓ move · space pick · a all · enter ok', output)}\n`;
-      items.forEach((it, i) => {
-        const active = i === idx;
-        const ptr = active ? c.cyan(S.ptr, output) : ' ';
-        const box = state[i] ? c.green(S.on, output) : c.gray(S.off, output);
-        const hint = it.hint ? '  ' + c.gray('·' + it.hint + '·', output) : '';
-        const label = active ? it.label : (state[i] ? it.label : c.dim(it.label, output));
-        out += `${c.gray(S.bar, output)}  ${ptr} ${box} ${label}${hint}\n`;
-      });
+      const list = filtered();
+      if (idx >= list.length) idx = Math.max(0, list.length - 1);
+      let start = 0;
+      if (list.length > pageSize) start = Math.min(Math.max(0, idx - Math.floor(pageSize / 2)), list.length - pageSize);
+      const end = Math.min(list.length, start + pageSize);
+
+      const search = query ? c.cyan(query, output) + c.cyan('▏', output) : c.gray('type to filter…', output);
+      let out = `${c.cyan(S.step, output)}  ${c.bold(message, output)}  ${c.gray('(' + selected.size + ' selected)', output)}\n`;
+      out += `${c.gray(S.bar, output)}  ${c.gray('search', output)} ${search}\n`;
+      if (!list.length) {
+        out += `${c.gray(S.bar, output)}  ${c.yellow('no matches — keep typing or ⌫ to clear', output)}\n`;
+      } else {
+        if (start > 0) out += `${c.gray(S.bar, output)}  ${c.gray('↑ ' + start + ' more', output)}\n`;
+        for (let i = start; i < end; i++) {
+          const it = list[i];
+          const active = i === idx;
+          const ptr = active ? c.cyan(S.ptr, output) : ' ';
+          const box = selected.has(it) ? c.green(S.on, output) : c.gray(S.off, output);
+          const hint = it.hint ? '  ' + c.gray('·' + it.hint + '·', output) : '';
+          const label = active ? it.label : (selected.has(it) ? it.label : c.dim(it.label, output));
+          out += `${c.gray(S.bar, output)}  ${ptr} ${box} ${label}${hint}\n`;
+        }
+        if (end < list.length) out += `${c.gray(S.bar, output)}  ${c.gray('↓ ' + (list.length - end) + ' more', output)}\n`;
+      }
+      out += `${c.gray(S.bar, output)}  ${c.gray('↑↓ move · space pick · type to search · enter ok · esc cancel', output)}\n`;
       output.write(out);
       lines = out.split('\n').length - 1;
     };
     const done = () => {
       rawOff(input, onKey);
       if (lines && output.isTTY) { readline.moveCursor(output, 0, -lines); readline.clearScreenDown(output); }
-      const chosen = items.filter((_, i) => state[i]);
-      const names = chosen.map(x => (x.shortLabel || x.label)).join(', ') || 'none';
+      const chosen = items.filter(it => selected.has(it));
+      const names = chosen.length === 0 ? 'none' : chosen.length <= 4 ? chosen.map(x => x.shortLabel || x.label).join(', ') : chosen.length + ' selected';
       output.write(`${c.green(S.step, output)}  ${c.bold(message, output)}  ${c.gray('· ' + names, output)}\n`);
       resolve(chosen);
     };
     const onKey = (str, key) => {
       key = key || {};
-      if (key.name === 'up' || key.name === 'k') idx = (idx - 1 + items.length) % items.length;
-      else if (key.name === 'down' || key.name === 'j') idx = (idx + 1) % items.length;
-      else if (key.name === 'space') state[idx] = !state[idx];
-      else if (key.name === 'a') { const all = state.every(Boolean); state.fill(!all); }
-      else if (key.name === 'return' || key.name === 'enter') return done();
+      const list = filtered();
+      if (key.name === 'return' || key.name === 'enter') return done();
       else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { rawOff(input, onKey); return reject(new CancelError()); }
+      else if (key.name === 'up') idx = list.length ? (idx - 1 + list.length) % list.length : 0;
+      else if (key.name === 'down') idx = list.length ? (idx + 1) % list.length : 0;
+      else if (key.name === 'space') { const it = list[idx]; if (it) selected.has(it) ? selected.delete(it) : selected.add(it); }
+      else if (key.name === 'backspace') { query = query.slice(0, -1); idx = 0; }
+      else if (str && str.length === 1 && str >= ' ' && !key.ctrl && !key.meta) { query += str; idx = 0; }
       else return;
       render();
     };
@@ -360,11 +411,6 @@ function confirm({ message, def = true, input = process.stdin, output = process.
   });
 }
 
-function text({ message, input = process.stdin, output = process.stdout }) {
-  output.write(`${c.cyan(S.step, output)}  ${c.bold(message, output)}\n`);
-  return question(`${c.gray(S.bar, output)}  `, input, output).then(a => a.trim());
-}
-
 function question(q, input, output) {
   const rl = readline.createInterface({ input, output });
   return new Promise(res => rl.question(q, ans => { rl.close(); res(ans); }));
@@ -384,29 +430,16 @@ async function runInstallWizard(opts) {
   }
 
   const catalog = scope === 'global' ? GLOBAL_TARGETS : TARGETS;
-  const items = catalog.map(t => ({
-    ...t,
-    checked: scope === 'global' ? (t.pre || homeExists(t.file)) : (t.pre || t.detect()),
-    hint: scope === 'global' ? null : (t.detect() && !t.pre ? 'detected' : (t.id === 'roo' ? 'legacy' : null)),
-  }));
-  // "Add another agent" is itself a selectable option in the list.
-  items.push({ id: '__add__', label: '➕ Add another agent / file not listed…', addMore: true, checked: false });
-
-  const selected = await checklist({ message: `Select agents (${scope})`, items });
-  let chosen = selected.filter(s => !s.addMore);
-
-  // selecting the add option opens the custom-file loop
-  if (selected.some(s => s.addMore)) {
-    while (true) {
-      const file = await text({ message: 'Custom file path (relative or absolute)' });
-      if (!file) break;
-      const fm = await confirm({ message: 'Needs Cursor-style frontmatter?', def: false });
-      chosen.push(customTarget(file, fm));
-      if (!(await confirm({ message: 'Add another file?', def: false }))) break;
-    }
-  }
-
-  chosen = dedupeByFile(chosen);
+  const items = catalog.map(t => {
+    const detected = scope === 'global' ? homeExists(t.file) : t.detect();
+    return {
+      ...t,
+      checked: t.pre || detected,
+      hint: (detected && !t.pre) ? 'detected' : (t.tag || null),
+    };
+  });
+  const selected = await checklist({ message: `Select agents (${scope}) — type to search`, items });
+  let chosen = dedupeByFile(selected);
   if (!chosen.length) { outro(c.yellow('Nothing selected. Nothing changed.')); return; }
 
   // preview

@@ -71,20 +71,31 @@ try {
   assert(!fs.existsSync('.humanly.json'), 'manifest (our own bookkeeping file) should be cleared');
   ok('remove is surgical: strips only our block, never deletes files or dirs, user content intact');
 
-  // 8. stream-driven checklist: toggle item 2 off, confirm with enter
-  const input = new PassThrough();
-  const output = new PassThrough();
-  const items = [{ label: 'A', checked: true }, { label: 'B', checked: true }, { label: 'C', checked: false }];
-  const p = api.checklist({ message: 'pick', items, input, output, interactive: true });
-  // move down to B, space to uncheck, enter
-  setImmediate(() => { input.write('\x1b[B'); input.write(' '); input.write('\r'); });
-  p.then(sel => {
-    assert.deepStrictEqual(sel.map(s => s.label), ['A'], 'checklist selection wrong: ' + sel.map(s => s.label));
+  // helper: drive a checklist via a fake stream and a sequence of key writes
+  const drive = (items, keys) => {
+    const input = new PassThrough(), output = new PassThrough();
+    const p = api.checklist({ message: 'pick', items, input, output, interactive: true });
+    setImmediate(() => keys.forEach(k => input.write(k)));
+    return p;
+  };
+
+  (async () => {
+    // 8. checklist: move down to B, space to uncheck, enter
+    const sel1 = await drive([{ label: 'A', checked: true }, { label: 'B', checked: true }, { label: 'C', checked: false }],
+      ['\x1b[B', ' ', '\r']);
+    assert.deepStrictEqual(sel1.map(s => s.label), ['A'], 'toggle wrong: ' + sel1.map(s => s.label));
+    ok('stream-driven checklist toggles + confirms');
+
+    // 9. search: type "gem" to filter to Gemini, space to select, enter
+    const sel2 = await drive([{ label: 'Cursor' }, { label: 'Gemini CLI' }, { label: 'Windsurf' }],
+      [...'gem', ' ', '\r']);
+    assert.deepStrictEqual(sel2.map(s => s.label), ['Gemini CLI'], 'search wrong: ' + sel2.map(s => s.label));
+    ok('checklist search filters then selects');
+
     process.chdir(orig);
     fs.rmSync(dir, { recursive: true, force: true });
-    ok('stream-driven checklist toggles + confirms');
     console.log(`\n${passed} checks passed.`);
-  }).catch(e => { console.error('checklist test failed:', e); process.exit(1); });
+  })().catch(e => { console.error('checklist test failed:', e); process.chdir(orig); fs.rmSync(dir, { recursive: true, force: true }); process.exit(1); });
 } catch (e) {
   process.chdir(orig);
   fs.rmSync(dir, { recursive: true, force: true });

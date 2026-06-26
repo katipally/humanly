@@ -1,6 +1,6 @@
 {
   "name": "humanly",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Make every AI agent write humanly: clean (no AI tells), lean (fewer tokens), honest. One ruleset, installed into every agent's instruction file via npx.",
   "bin": {
     "humanly": "bin/humanly.js"

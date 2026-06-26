@@ -8,7 +8,7 @@ One tight ruleset, installed into every agent's instruction file with a single c
 npx humanly
 ```
 
-That opens a short wizard: pick scope (this project or your whole machine), check the agents you use (detected ones are pre-checked), optionally add a custom file, preview the changes, confirm. Zero dependencies, nothing to download.
+That opens a short wizard: pick scope (this project or your whole machine), then pick agents from the full catalog — **start typing to search** it, detected agents are pre-checked, preview the changes, confirm. Zero dependencies, nothing to download.
 
 ## Why
 
@@ -31,23 +31,21 @@ npx humanly
 ```
 
 ```
-┌  humanly  v0.2.2
+┌  humanly  v0.2.3
 │
 ◇  Install humanly for  ↑↓ move · enter select
 │  ❯ ● This project (current folder)
 │    ○ Globally (your whole machine)
 │
-◇  Select agents (project)  ↑↓ move · space pick · a all · enter ok
-│    ◉ AGENTS.md hub (Codex, OpenCode, Amp, Zed, Kilo, Trae)  ·detected·
-│    ◉ Claude Code  ·detected·
-│  ❯ ◉ Cursor
-│    ◯ GitHub Copilot
-│    ◯ ➕ Add another agent / file not listed…
+◇  Select agents (project) — type to search  (2 selected)
+│  search kilo▏
+│  ❯ ◯ Kilo Code
+│  ↑↓ move · space pick · type to search · enter ok · esc cancel
 │
 └  Done. Open a new agent session to pick up the rules.
 ```
 
-It detects the agents you already use and pre-checks them. Toggle any others, or check **➕ Add another agent** right in the list to point humanly at a file it doesn't know about. It shows a preview (`create` / `append to` / `update in`) before writing anything.
+It lists every agent in the catalog and pre-checks the ones you already use. The list is long, so **just start typing to filter** it (by name or brand — "codex", "warp", "junie"…), `space` to pick, `enter` to confirm. It shows a preview (`create` / `append to` / `update in`) before writing anything.
 
 **Scriptable flags** (no prompts, for CI or dotfiles):
 
@@ -85,18 +83,30 @@ Remove scans everywhere humanly actually lives, then strips **only** its own blo
 
 | Agent | File |
 |---|---|
-| Codex, OpenCode, Amp, Zed, Kilo, Trae, Jules, VS Code | `AGENTS.md` |
-| Claude Code | `CLAUDE.md` (also reads `AGENTS.md`) |
-| OpenCode (global) | `~/.config/opencode/AGENTS.md` |
-| Gemini CLI | `GEMINI.md` |
-| GitHub Copilot | `.github/copilot-instructions.md` |
+| Codex, OpenCode, Amp, Zed, Devin, Jules, Factory, OpenHands | `AGENTS.md` (Linux-Foundation standard) |
+| Claude Code | `CLAUDE.md` |
 | Cursor | `.cursor/rules/humanly.mdc` |
-| Windsurf | `.windsurf/rules/humanly.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Gemini CLI | `GEMINI.md` |
+| Windsurf / Devin Desktop | `.windsurf/rules/humanly.md` |
 | Cline | `.clinerules` |
+| Continue.dev | `.continue/rules/humanly.md` |
+| Augment Code | `.augment/rules/humanly.md` |
+| Kilo Code | `.kilocode/rules/humanly.md` |
+| Trae | `.trae/rules/project_rules.md` |
+| JetBrains Junie | `.junie/AGENTS.md` |
+| Warp | `WARP.md` |
+| Goose | `.goosehints` |
+| Replit Agent | `replit.md` |
+| Firebase Studio (ex Project IDX) | `.idx/airules.md` |
+| Tabnine | `.tabnine/guidelines/humanly.md` |
+| Sourcegraph Cody | `.sourcegraph/humanly.rule.md` |
+| Qodo | `best_practices.md` |
+| Aider | `CONVENTIONS.md` (also add it under `read:` in `.aider.conf.yml`) |
 | Roo Code (legacy) | `.roo/rules/humanly.md` |
 | anything else | `npx humanly init --add <path>` |
 
-Installs are idempotent. Re-running `init` updates the block in place, never duplicates it.
+File paths verified as of June 2026. Global (`--global`) writes the user-level equivalents (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.config/amp/AGENTS.md`, `~/.config/zed/AGENTS.md`, `~/.gemini/GEMINI.md`, and more). Installs are idempotent — re-running `init` updates the block in place, never duplicates it.
 
 ## Safe by design
 
